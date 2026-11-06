@@ -100,10 +100,10 @@ export function Presenter() {
       {groups.length === 0 && <p className="empty">Nenhum visitante ainda.</p>}
       {blocks.map((b) => (
         <section className="card city-block" key={b.city} aria-label={`Cidade ${b.city}`}>
-          <h2 className="city-title">{b.city}</h2>
+          <h2 className="city-title">De {b.city},</h2>
           {b.churches.map((ch) => (
             <div className="church-block" key={ch.church} role="group" aria-label={`Igreja ${ch.church}`}>
-              <h3 className="church-title">{ch.church}</h3>
+              <h3 className="church-title">da {ch.church}</h3>
               {ch.groups.map((g) => (
                 <label key={g.id} className={`group-card ${g.presented ? 'done' : ''}`}>
                   <input type="checkbox" checked={g.presented} onChange={(e) => toggle(g.id, e.target.checked)} />

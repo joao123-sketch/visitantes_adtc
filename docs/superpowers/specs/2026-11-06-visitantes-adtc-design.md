@@ -56,7 +56,7 @@ Exemplo real: "João, Maria e Carlos da ADTC em Ipueiras" vira um registro com c
 
 ## Lista do apresentador
 
-- Blocos por cidade e, dentro de cada cidade, blocos por igreja (na ordem em que chegaram; cidade e igreja iguais por acento/caixa ficam no mesmo bloco). Dentro de cada bloco de igreja ficam os grupos, cada um com seus nomes.
+- Blocos por cidade e, dentro de cada cidade, blocos por igreja (na ordem em que chegaram; cidade e igreja iguais por acento/caixa ficam no mesmo bloco). Dentro de cada bloco de igreja ficam os grupos, cada um com seus nomes. Para o apresentador ler em voz alta, o título da cidade aparece como "De Ipueiras," e o da igreja como "da ADTC", com a igreja em letra maior que a cidade.
 - Cada grupo tem uma única caixinha, centralizada na vertical, e o cartão do grupo inteiro é a área de toque. Ao marcar, todos os nomes do grupo ficam riscados. Não há caixinha por pessoa nem botão "já apresentei". O grupo conta como apresentado quando todas as pessoas dele estão marcadas; se alguém for adicionado depois por edição, o grupo volta a ficar desmarcado. O contador mostra grupos apresentados.
 - Quem foi apresentado permanece no mesmo lugar, só riscado (não vai para o fim da lista).
 - Observações aparecem em destaque dentro do cartão.
