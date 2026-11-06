@@ -56,6 +56,17 @@ describe('login', () => {
   })
 })
 
+describe('erros internos', () => {
+  it('falha ao falar com o banco devolve 500 em JSON com mensagem legível', async () => {
+    store.getPin = async () => {
+      throw new Error('Invalid API key')
+    }
+    const r = await login('111')
+    expect(r.status).toBe(500)
+    expect(await r.json()).toEqual({ error: 'Erro no servidor', detail: 'Invalid API key' })
+  })
+})
+
 describe('eventos', () => {
   it('admin lista eventos, o mais recente primeiro; recepção recebe 403', async () => {
     const t = await tokenFor('admin')

@@ -25,6 +25,12 @@ function mergeObservation(current: string | null, extra: string | null | undefin
 export function createApp(store: Store, secret: string) {
   const app = new Hono<Env>()
 
+  // Falhas internas (ex.: banco indisponível ou chave errada) viram JSON legível em vez de texto solto.
+  app.onError((err, c) => {
+    console.error(err)
+    return c.json({ error: 'Erro no servidor', detail: String(err?.message ?? err).slice(0, 200) }, 500)
+  })
+
   const auth = async (c: Context<Env>, next: Next) => {
     const header = c.req.header('authorization') ?? ''
     const token = header.startsWith('Bearer ') ? header.slice(7) : ''

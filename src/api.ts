@@ -57,7 +57,8 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const message = (data as { error?: string }).error ?? 'Erro inesperado'
+    const body = data as { error?: string; detail?: string }
+    const message = body.error ? (body.detail ? `${body.error}: ${body.detail}` : body.error) : 'Erro inesperado'
     if (res.status === 401 && path !== '/api/login') {
       session.clear()
       onUnauthorized()
