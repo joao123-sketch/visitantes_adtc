@@ -48,5 +48,7 @@ export interface Store {
   listPeople(eventId: string): Promise<PersonRow[]>
   listPeopleByGroup(groupId: string): Promise<PersonRow[]>
   deletePerson(id: string): Promise<void>
+  /** Atualiza nome e chaves mantendo a marcação de apresentado. Devolve false se a nova chave já existir no evento. */
+  updatePerson(id: string, fields: { name: string; name_key: string; city_key: string; church_key: string }): Promise<boolean>
   setPresented(personId: string, presented: boolean): Promise<void>
 }

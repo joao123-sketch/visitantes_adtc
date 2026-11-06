@@ -32,35 +32,52 @@ export function Login({ onLogin }: { onLogin: (role: Role) => void }) {
 
   return (
     <div className="login">
-      <img src="/logo.jpg" alt="ADTC Guaraciaba do Norte" />
+      <img src="/logo.png" alt="Logo da ADTC Guaraciaba do Norte" />
       <h1>Visitantes ADTC</h1>
+      <p className="sub">Digite o código de acesso para entrar</p>
       {!needName ? (
-        <div className="card" style={{ textAlign: 'left' }}>
-          <label htmlFor="pin">Digite o código de acesso</label>
+        <form
+          className="card"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (pin.length >= 3) void enter(name)
+          }}
+        >
+          <label htmlFor="pin">Código de acesso</label>
           <input
             id="pin"
             className="pin"
+            type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={6}
+            maxLength={8}
             autoComplete="off"
+            aria-describedby={error ? 'login-erro' : undefined}
             value={pin}
             onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
           />
-          {error && <div className="banner err" style={{ marginTop: 10 }}>{error}</div>}
-          <button className="btn blue" disabled={busy || pin.length !== 6} onClick={() => enter(name)}>
+          <div id="login-erro" role="alert">
+            {error && <div className="banner err" style={{ marginTop: 12 }}>{error}</div>}
+          </div>
+          <button className="btn" type="submit" disabled={busy || pin.length < 3} style={{ marginTop: 14 }}>
             Entrar
           </button>
-        </div>
+        </form>
       ) : (
-        <div className="card" style={{ textAlign: 'left' }}>
+        <form
+          className="card"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (name.trim()) void enter(name.trim())
+          }}
+        >
           <label htmlFor="nome">Qual é o seu primeiro nome?</label>
-          <input id="nome" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          {error && <div className="banner err" style={{ marginTop: 10 }}>{error}</div>}
-          <button className="btn" disabled={busy || !name.trim()} onClick={() => enter(name.trim())}>
+          <input id="nome" value={name} onChange={(e) => setName(e.target.value)} autoFocus autoComplete="given-name" />
+          <div role="alert">{error && <div className="banner err" style={{ marginTop: 12 }}>{error}</div>}</div>
+          <button className="btn" type="submit" disabled={busy || !name.trim()} style={{ marginTop: 14 }}>
             Continuar
           </button>
-        </div>
+        </form>
       )}
     </div>
   )

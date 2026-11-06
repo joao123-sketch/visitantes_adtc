@@ -80,6 +80,13 @@ export function memoryStore(): Store {
       const i = people.findIndex((x) => x.id === pid)
       if (i >= 0) people.splice(i, 1)
     },
+    async updatePerson(pid, f) {
+      const p = people.find((x) => x.id === pid)
+      if (!p) return false
+      if (people.some((x) => x.id !== pid && keyOf(x) === keyOf({ event_id: p.event_id, ...f }))) return false
+      Object.assign(p, f)
+      return true
+    },
     async setPresented(pid, presented) {
       const p = people.find((x) => x.id === pid)
       if (p) p.presented = presented

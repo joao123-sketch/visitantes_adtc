@@ -86,11 +86,12 @@ describe('eventos', () => {
     const t = await tokenFor('reception')
     expect(await (await call('GET', '/api/events/current', t)).json()).toEqual({ event: null })
   })
-  it('PUT /api/pins com PIN de 5 dígitos devolve 400; com 6 dígitos troca', async () => {
+  it('PIN com menos de 3 dígitos ou com letras devolve 400; PIN de 3 dígitos é aceito', async () => {
     const t = await tokenFor('admin')
-    expect((await call('PUT', '/api/pins/reception', t, { pin: '12345' })).status).toBe(400)
-    expect((await call('PUT', '/api/pins/reception', t, { pin: '999999' })).status).toBe(200)
-    expect((await login('999999')).status).toBe(200)
+    expect((await call('PUT', '/api/pins/reception', t, { pin: '12' })).status).toBe(400)
+    expect((await call('PUT', '/api/pins/reception', t, { pin: 'abc' })).status).toBe(400)
+    expect((await call('PUT', '/api/pins/reception', t, { pin: '999' })).status).toBe(200)
+    expect((await login('999')).status).toBe(200)
   })
 })
 
@@ -235,6 +236,134 @@ describe('visitantes', () => {
   })
 })
 
+describe('revisão final', () => {
+  it('reenvio depois de falha no meio do envio completa as pessoas que faltaram', async () => {
+    const eid = await openEvent()
+    const t = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    const real = store.insertPerson.bind(store)
+    let calls = 0
+    store.insertPerson = async (p) => {
+      calls++
+      if (calls === 2) throw new Error('queda')
+      return real(p)
+    }
+    const body = { clientId: uid(), eventId: eid, city: 'Ipueiras', church: 'ADTC', names: ['Maria', 'Carlos'] }
+    expect((await call('POST', '/api/groups', t, body)).status).toBe(500)
+    const again = await call('POST', '/api/groups', t, body)
+    expect(again.status).toBe(200)
+    expect(((await again.json()) as { added: string[] }).added.sort()).toEqual(['Carlos', 'Maria'])
+    const list = await getList(eid, pres)
+    expect(list.groups).toHaveLength(1)
+    expect(list.groups[0].people.map((p) => p.name).sort()).toEqual(['Carlos', 'Maria'])
+  })
+  it('grupo que ficou vazio por falha é preenchido no reenvio, sem cartão duplicado', async () => {
+    const eid = await openEvent()
+    const t = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    const real = store.insertPerson.bind(store)
+    let calls = 0
+    store.insertPerson = async (p) => {
+      calls++
+      if (calls === 1) throw new Error('queda')
+      return real(p)
+    }
+    const body = { clientId: uid(), eventId: eid, city: 'Ipueiras', church: 'ADTC', names: ['Maria'] }
+    await call('POST', '/api/groups', t, body)
+    await call('POST', '/api/groups', t, body)
+    const list = await getList(eid, pres)
+    expect(list.groups).toHaveLength(1)
+    expect(list.groups[0].people).toHaveLength(1)
+  })
+  it('mesmo nome duas vezes no mesmo envio conta uma vez', async () => {
+    const eid = await openEvent()
+    const t = await tokenFor('reception')
+    const r = (await (await submit(t, eid, ['João', 'joao'])).json()) as { added: string[] }
+    expect(r.added).toEqual(['João'])
+  })
+
+  it('PIN igual ao de outro acesso devolve 409', async () => {
+    const t = await tokenFor('admin')
+    const r = await call('PUT', '/api/pins/presenter', t, { pin: '222222' })
+    expect(r.status).toBe(409)
+    expect(await r.json()).toEqual({ error: 'Esse código já é usado por outro acesso' })
+  })
+
+  it('trocar o PIN derruba as sessões antigas daquele acesso', async () => {
+    const adm = await tokenFor('admin')
+    const rec = await tokenFor('reception')
+    expect((await call('GET', '/api/events/current', rec)).status).toBe(200)
+    await call('PUT', '/api/pins/reception', adm, { pin: '999999' })
+    expect((await call('GET', '/api/events/current', rec)).status).toBe(401)
+    expect((await call('GET', '/api/events/current', adm)).status).toBe(200)
+  })
+
+  const put = (t: string, gid: string, people: { id?: string; name: string }[], over: Record<string, unknown> = {}) =>
+    call('PUT', `/api/groups/${gid}`, t, { city: 'Ipueiras', church: 'ADTC', observation: null, people, ...over })
+  const mark = async (pres: string, id: string) => call('PUT', `/api/people/${id}/presented`, pres, { presented: true })
+
+  it('corrigir o nome de quem já foi apresentado mantém a marcação', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    await submit(a, eid, ['Jose'])
+    const g = (await getMine(eid, a)).groups[0]
+    await mark(pres, g.people[0].id)
+    expect((await put(a, g.id, [{ id: g.people[0].id, name: 'José Carlos' }])).status).toBe(200)
+    const p = (await getList(eid, pres)).groups[0].people
+    expect(p).toHaveLength(1)
+    expect(p[0].name).toBe('José Carlos')
+    expect(p[0].presented).toBe(true)
+  })
+  it('corrigir a cidade mantém a marcação de apresentado', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    await submit(a, eid, ['João'], { city: 'Ipueras' })
+    const g = (await getMine(eid, a)).groups[0]
+    await mark(pres, g.people[0].id)
+    expect((await put(a, g.id, [{ id: g.people[0].id, name: 'João' }], { city: 'Ipueiras' })).status).toBe(200)
+    const list = await getList(eid, pres)
+    expect(list.groups[0].people[0].presented).toBe(true)
+  })
+  it('corrigir só a grafia (mesma chave) atualiza o nome mostrado', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    await submit(a, eid, ['joao silva'])
+    const g = (await getMine(eid, a)).groups[0]
+    await put(a, g.id, [{ id: g.people[0].id, name: 'João Silva' }])
+    expect((await getList(eid, pres)).groups[0].people[0].name).toBe('João Silva')
+  })
+  it('remover alguém do meio não passa a marcação para outra pessoa', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    await submit(a, eid, ['Ana', 'Bia', 'Caio'])
+    const g = (await getMine(eid, a)).groups[0]
+    const [ana, bia, caio] = g.people
+    await mark(pres, bia.id)
+    await put(a, g.id, [{ id: ana.id, name: 'Ana' }, { id: caio.id, name: 'Caio' }])
+    const p = (await getList(eid, pres)).groups[0].people
+    expect(p.map((x) => x.name)).toEqual(['Ana', 'Caio'])
+    expect(p.every((x) => !x.presented)).toBe(true)
+  })
+  it('edição que dá 409 não apaga nem altera nada', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    await submit(a, eid, ['Ana'])
+    await submit(a, eid, ['Bia', 'Caio'])
+    const g = (await getMine(eid, a)).groups.find((x) => x.people.some((p) => p.name === 'Bia'))!
+    const bia = g.people.find((p) => p.name === 'Bia')!
+    const r = await put(a, g.id, [{ id: bia.id, name: 'Bia' }, { name: 'Ana' }], { observation: 'x' })
+    expect(r.status).toBe(409)
+    const after = (await getList(eid, pres)).groups.find((x) => x.id === g.id)!
+    expect(after.people.map((p) => p.name).sort()).toEqual(['Bia', 'Caio'])
+    expect(after.observation).toBeNull()
+  })
+})
+
 describe('apresentador', () => {
   it('lista em ordem de chegada', async () => {
     const eid = await openEvent()
@@ -257,6 +386,36 @@ describe('apresentador', () => {
     expect((await first()).presented).toBe(true)
     await call('PUT', `/api/people/${p.id}/presented`, pres, { presented: false })
     expect((await first()).presented).toBe(false)
+  })
+  it('marcar o grupo marca todas as pessoas; desmarcar desmarca todas', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    await submit(a, eid, ['Ana', 'Bia', 'Caio'])
+    const gid = (await getList(eid, pres)).groups[0].id
+    expect((await call('PUT', `/api/groups/${gid}/presented`, pres, { presented: true })).status).toBe(200)
+    expect((await getList(eid, pres)).groups[0].people.every((p) => p.presented)).toBe(true)
+    await call('PUT', `/api/groups/${gid}/presented`, pres, { presented: false })
+    expect((await getList(eid, pres)).groups[0].people.some((p) => p.presented)).toBe(false)
+  })
+  it('marcar um grupo não mexe nos outros grupos', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    await submit(a, eid, ['Ana'])
+    await submit(a, eid, ['Bia'], { city: 'Viçosa' })
+    const groups = (await getList(eid, pres)).groups
+    await call('PUT', `/api/groups/${groups[0].id}/presented`, pres, { presented: true })
+    const after = (await getList(eid, pres)).groups
+    expect(after[0].people[0].presented).toBe(true)
+    expect(after[1].people[0].presented).toBe(false)
+  })
+  it('recepção não marca grupo como apresentado (403)', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    await submit(a, eid, ['Ana'])
+    const gid = (await getMine(eid, a)).groups[0].id
+    expect((await call('PUT', `/api/groups/${gid}/presented`, a, { presented: true })).status).toBe(403)
   })
   it('recepção não marca apresentado (403)', async () => {
     const a = await tokenFor('reception')

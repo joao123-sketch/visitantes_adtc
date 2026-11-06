@@ -12,8 +12,8 @@ if (existsSync('.dev.vars')) {
 }
 
 const [role, pin] = process.argv.slice(2)
-if (!['admin', 'reception', 'presenter'].includes(role) || !/^\d{6}$/.test(pin ?? '')) {
-  console.error('Uso: npx tsx scripts/set-pin.ts <admin|reception|presenter> <PIN de 6 dígitos>')
+if (!['admin', 'reception', 'presenter'].includes(role) || !/^\d{3,8}$/.test(pin ?? '')) {
+  console.error('Uso: npx tsx scripts/set-pin.ts <admin|reception|presenter> <PIN de 3 a 8 dígitos>')
   process.exit(1)
 }
 const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env

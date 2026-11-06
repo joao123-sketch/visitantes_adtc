@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type EventInfo, type GroupItem } from '../api'
 import { createQueue } from '../queue'
+import { normalizeKey } from '../../server/normalize'
 
-type Tick = { personId: string; presented: boolean }
-const ticks = createQueue<Tick>('pending-ticks', (t) => t.personId)
+type Tick = { groupId: string; presented: boolean }
+const ticks = createQueue<Tick>('pending-group-ticks', (t) => t.groupId)
 const CACHE = 'last-list'
 
 type Cached = { event: EventInfo | null; groups: GroupItem[] }
@@ -24,7 +25,7 @@ export function Presenter() {
   const poll = useCallback(async () => {
     try {
       await ticks.flush(async (t) => {
-        await api(`/api/people/${t.personId}/presented`, { method: 'PUT', body: { presented: t.presented } })
+        await api(`/api/groups/${t.groupId}/presented`, { method: 'PUT', body: { presented: t.presented } })
       })
       setPendingTicks(ticks.items())
       const { event } = await api<{ event: EventInfo | null }>('/api/events/current')
@@ -46,19 +47,31 @@ export function Presenter() {
     return () => clearInterval(id)
   }, [poll])
 
-  function toggle(personId: string, presented: boolean) {
-    ticks.enqueue({ personId, presented })
+  function toggle(groupId: string, presented: boolean) {
+    ticks.enqueue({ groupId, presented })
     setPendingTicks(ticks.items())
     void poll()
   }
 
-  const overlay = new Map(pendingTicks.map((t) => [t.personId, t.presented]))
+  // Um grupo conta como apresentado quando todas as pessoas dele estão marcadas.
+  const overlay = new Map(pendingTicks.map((t) => [t.groupId, t.presented]))
   const groups = data.groups.map((g) => ({
     ...g,
-    people: g.people.map((p) => ({ ...p, presented: overlay.get(p.id) ?? p.presented })),
+    presented: overlay.get(g.id) ?? (g.people.length > 0 && g.people.every((p) => p.presented)),
   }))
-  const total = groups.reduce((n, g) => n + g.people.length, 0)
-  const done = groups.reduce((n, g) => n + g.people.filter((p) => p.presented).length, 0)
+  const total = groups.length
+  const done = groups.filter((g) => g.presented).length
+
+  // Blocos por cidade e, dentro, por igreja, na ordem em que chegaram (sem repetir por acento ou caixa).
+  type Block = { city: string; churches: { church: string; groups: typeof groups }[] }
+  const blocks: Block[] = []
+  for (const g of groups) {
+    let b = blocks.find((x) => normalizeKey(x.city) === normalizeKey(g.city))
+    if (!b) blocks.push((b = { city: g.city, churches: [] }))
+    let ch = b.churches.find((x) => normalizeKey(x.church) === normalizeKey(g.church))
+    if (!ch) b.churches.push((ch = { church: g.church, groups: [] }))
+    ch.groups.push(g)
+  }
 
   if (!loaded && data.event === null && data.groups.length === 0) return <p className="empty">Carregando...</p>
   if (data.event === null) return <p className="empty">Nenhum evento aberto.</p>
@@ -66,24 +79,47 @@ export function Presenter() {
   return (
     <>
       <h1>{data.event.name}</h1>
-      <p className="sub">
-        {groups.length} grupo(s) · {done} de {total} apresentados
+      <p className="sub" aria-live="polite">
+        {done} de {total} grupo(s) apresentados
       </p>
-      {!online && <div className="banner">Sem conexão. Mostrando a última lista carregada.</div>}
-      {groups.length === 0 && <p className="empty">Nenhum visitante ainda.</p>}
-      {groups.map((g) => (
-        <div className="card" key={g.id}>
-          <div className="group-title">
-            {g.city} · {g.church}
-          </div>
-          {g.people.map((p) => (
-            <label key={p.id} className={`person ${p.presented ? 'done' : ''}`} style={{ margin: 0, color: 'inherit' }}>
-              <input type="checkbox" checked={p.presented} onChange={(e) => toggle(p.id, e.target.checked)} />
-              <span>{p.name}</span>
-            </label>
-          ))}
-          {g.observation && <div className="obs">{g.observation}</div>}
+      <div
+        className="progress"
+        role="progressbar"
+        aria-label="Grupos apresentados"
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={done}
+      >
+        <i style={{ width: total ? `${(done / total) * 100}%` : '0%' }} />
+      </div>
+      {!online && (
+        <div className="banner" role="status">
+          Sem conexão. Mostrando a última lista carregada.
         </div>
+      )}
+      {groups.length === 0 && <p className="empty">Nenhum visitante ainda.</p>}
+      {blocks.map((b) => (
+        <section className="card city-block" key={b.city} aria-label={`Cidade ${b.city}`}>
+          <h2 className="city-title">{b.city}</h2>
+          {b.churches.map((ch) => (
+            <div className="church-block" key={ch.church} role="group" aria-label={`Igreja ${ch.church}`}>
+              <h3 className="church-title">{ch.church}</h3>
+              {ch.groups.map((g) => (
+                <label key={g.id} className={`group-card ${g.presented ? 'done' : ''}`}>
+                  <input type="checkbox" checked={g.presented} onChange={(e) => toggle(g.id, e.target.checked)} />
+                  <div className="group-body">
+                    <ul className="names">
+                      {g.people.map((p) => (
+                        <li key={p.id}>{p.name}</li>
+                      ))}
+                    </ul>
+                    {g.observation && <div className="obs">{g.observation}</div>}
+                  </div>
+                </label>
+              ))}
+            </div>
+          ))}
+        </section>
       ))}
     </>
   )

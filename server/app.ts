@@ -30,6 +30,8 @@ export function createApp(store: Store, secret: string) {
     const token = header.startsWith('Bearer ') ? header.slice(7) : ''
     const user = token ? await verifyToken(token, secret) : null
     if (!user) return c.json({ error: 'Sessão inválida' }, 401)
+    const pin = await store.getPin(user.role)
+    if (!pin || pin.pin_hash.slice(0, 16) !== user.ph) return c.json({ error: 'Sessão inválida' }, 401)
     c.set('user', user)
     await next()
   }
@@ -49,7 +51,7 @@ export function createApp(store: Store, secret: string) {
       const row = await store.getPin(role)
       if (row && (await hashPin(pin, row.salt)) === row.pin_hash) {
         const name = body.name ? text(body.name) : undefined
-        const token = await signToken({ role, deviceId, name }, secret)
+        const token = await signToken({ role, deviceId, name, ph: row.pin_hash.slice(0, 16) }, secret)
         return c.json({ token, role })
       }
     }
@@ -96,7 +98,12 @@ export function createApp(store: Store, secret: string) {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const pin = String(body.pin ?? '')
     if (!ROLES.includes(role)) return c.json({ error: 'Papel inválido' }, 400)
-    if (!/^\d{6}$/.test(pin)) return c.json({ error: 'O PIN precisa ter 6 dígitos' }, 400)
+    if (!/^\d{3,8}$/.test(pin)) return c.json({ error: 'O código precisa ter de 3 a 8 números' }, 400)
+    for (const other of ROLES.filter((r) => r !== role)) {
+      const row = await store.getPin(other)
+      if (row && (await hashPin(pin, row.salt)) === row.pin_hash)
+        return c.json({ error: 'Esse código já é usado por outro acesso' }, 409)
+    }
     const salt = crypto.randomUUID()
     await store.setPin(role, await hashPin(pin, salt), salt)
     return c.json({ ok: true })
@@ -125,31 +132,32 @@ export function createApp(store: Store, secret: string) {
     if (names.length === 0) return c.json({ error: 'Informe pelo menos um nome' }, 400)
     if (!(await store.getEvent(eventId))) return c.json({ error: 'Evento não encontrado' }, 404)
 
-    const existing = await store.findGroupByClient(eventId, clientId)
-    if (existing) {
-      const people = (await store.listPeopleByGroup(existing.id)).map((p) => p.name)
-      return c.json({ added: people, duplicates: [] })
-    }
-
-    const group = await store.insertGroup({
-      event_id: eventId,
-      client_id: clientId,
-      city,
-      church,
-      observation: text(body.observation) || null,
-      device_id: user.deviceId,
-      receptionist: user.name ?? null,
-    })
+    // Reenvio seguro: reaproveita o grupo e refaz só o que faltou (a chave única impede duplicar).
+    const group =
+      (await store.findGroupByClient(eventId, clientId)) ??
+      (await store.insertGroup({
+        event_id: eventId,
+        client_id: clientId,
+        city,
+        church,
+        observation: text(body.observation) || null,
+        device_id: user.deviceId,
+        receptionist: user.name ?? null,
+      }))
     const added: string[] = []
     const duplicates: string[] = []
+    const seen = new Set<string>()
     const cityKey = normalizeKey(city)
     const churchKey = normalizeKey(church)
     for (const name of names) {
+      const nameKey = normalizeKey(name)
+      if (seen.has(nameKey)) continue
+      seen.add(nameKey)
       const row = await store.insertPerson({
         group_id: group.id,
         event_id: eventId,
         name,
-        name_key: normalizeKey(name),
+        name_key: nameKey,
         city_key: cityKey,
         church_key: churchKey,
       })
@@ -157,9 +165,13 @@ export function createApp(store: Store, secret: string) {
         added.push(name)
         continue
       }
+      const other = await store.findPersonByKey(eventId, nameKey, cityKey, churchKey)
+      if (other && other.group_id === group.id) {
+        added.push(name) // já gravado numa tentativa anterior deste mesmo envio
+        continue
+      }
       duplicates.push(name)
-      const other = await store.findPersonByKey(eventId, normalizeKey(name), cityKey, churchKey)
-      if (other && other.group_id !== group.id && group.observation) {
+      if (other && group.observation) {
         const og = await store.getGroup(other.group_id)
         if (og) {
           const merged = mergeObservation(og.observation, group.observation)
@@ -167,7 +179,7 @@ export function createApp(store: Store, secret: string) {
         }
       }
     }
-    if (added.length === 0) await store.deleteGroup(group.id)
+    if ((await store.listPeopleByGroup(group.id)).length === 0) await store.deleteGroup(group.id)
     return c.json({ added, duplicates })
   })
 
@@ -201,35 +213,65 @@ export function createApp(store: Store, secret: string) {
     const church = text(body.church)
     const names = cleanNames(body.names)
     if (!city || !church) return c.json({ error: 'Preencha cidade e igreja' }, 400)
-    if (names.length === 0) return c.json({ error: 'Informe pelo menos um nome' }, 400)
 
     const cityKey = normalizeKey(city)
     const churchKey = normalizeKey(church)
-    const current = await store.listPeopleByGroup(group.id)
-    const wanted = new Map<string, string>() // name_key -> nome
-    for (const n of names) if (!wanted.has(normalizeKey(n))) wanted.set(normalizeKey(n), n)
+    const current = (await store.listPeopleByGroup(group.id)).sort((x, y) => x.created_at.localeCompare(y.created_at))
 
-    const keepsIdentity = (p: PersonRow, key: string) => p.name_key === key && p.city_key === cityKey && p.church_key === churchKey
-    const toKeep = current.filter((p) => [...wanted.keys()].some((k) => keepsIdentity(p, k)))
-    const toRemove = current.filter((p) => !toKeep.includes(p))
-    const toAdd = [...wanted.entries()].filter(([k]) => !toKeep.some((p) => keepsIdentity(p, k)))
-
-    for (const [key] of toAdd) {
-      const clash = await store.findPersonByKey(group.event_id, key, cityKey, churchKey)
-      if (clash && !toRemove.some((p) => p.id === clash.id)) return c.json({ error: 'Essa pessoa já está na lista' }, 409)
+    // Entradas com id mantêm a pessoa (e a marcação de apresentado); sem id, vale o nome.
+    type Entry = { id?: string; name: string }
+    const raw: Entry[] = Array.isArray(body.people)
+      ? (body.people as { id?: unknown; name?: unknown }[]).map((p) => ({ id: p?.id ? String(p.id) : undefined, name: text(p?.name) }))
+      : names.map((n) => ({ name: n }))
+    const used = new Set<string>()
+    const entries: Entry[] = []
+    const seenKeys = new Set<string>()
+    for (const e of raw) {
+      if (!e.name) continue
+      const key = normalizeKey(e.name)
+      if (seenKeys.has(key)) continue
+      seenKeys.add(key)
+      let id = e.id && current.some((p) => p.id === e.id) && !used.has(e.id) ? e.id : undefined
+      if (!id && !e.id) id = current.find((p) => p.name_key === key && !used.has(p.id))?.id
+      if (id) used.add(id)
+      entries.push({ id, name: e.name })
     }
-    for (const p of toRemove) await store.deletePerson(p.id)
-    for (const [key, name] of toAdd) {
+    if (entries.length === 0) return c.json({ error: 'Informe pelo menos um nome' }, 400)
+
+    const toRemove = current.filter((p) => !used.has(p.id))
+    const updates = entries
+      .filter((e) => e.id)
+      .map((e) => ({ person: current.find((p) => p.id === e.id)!, name: e.name, key: normalizeKey(e.name) }))
+      .filter((u) => u.person.name !== u.name || u.person.name_key !== u.key || u.person.city_key !== cityKey || u.person.church_key !== churchKey)
+    const inserts = entries.filter((e) => !e.id)
+
+    // Confere todos os conflitos antes de mexer em qualquer coisa.
+    const clashesRemoved: string[] = []
+    for (const target of [...updates.map((u) => ({ key: u.key, self: u.person.id })), ...inserts.map((e) => ({ key: normalizeKey(e.name), self: '' }))]) {
+      const clash = await store.findPersonByKey(group.event_id, target.key, cityKey, churchKey)
+      if (!clash || clash.id === target.self) continue
+      if (toRemove.some((p) => p.id === clash.id)) clashesRemoved.push(clash.id)
+      else return c.json({ error: 'Essa pessoa já está na lista' }, 409)
+    }
+
+    // Ordem segura: libera chaves, atualiza, insere e só então apaga o resto.
+    for (const id of clashesRemoved) await store.deletePerson(id)
+    for (const u of updates) {
+      const ok = await store.updatePerson(u.person.id, { name: u.name, name_key: u.key, city_key: cityKey, church_key: churchKey })
+      if (!ok) return c.json({ error: 'Essa pessoa já está na lista' }, 409)
+    }
+    for (const e of inserts) {
       const row = await store.insertPerson({
         group_id: group.id,
         event_id: group.event_id,
-        name,
-        name_key: key,
+        name: e.name,
+        name_key: normalizeKey(e.name),
         city_key: cityKey,
         church_key: churchKey,
       })
       if (!row) return c.json({ error: 'Essa pessoa já está na lista' }, 409)
     }
+    for (const p of toRemove) if (!clashesRemoved.includes(p.id)) await store.deletePerson(p.id)
     await store.updateGroup(group.id, { city, church, observation: text(body.observation) || null })
     return c.json({ ok: true })
   })
@@ -254,6 +296,13 @@ export function createApp(store: Store, secret: string) {
   app.put('/api/people/:id/presented', only('presenter', 'admin'), async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     await store.setPresented(c.req.param('id') ?? '', body.presented === true)
+    return c.json({ ok: true })
+  })
+
+  app.put('/api/groups/:id/presented', only('presenter', 'admin'), async (c) => {
+    const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
+    const presented = body.presented === true
+    for (const p of await store.listPeopleByGroup(c.req.param('id') ?? '')) await store.setPresented(p.id, presented)
     return c.json({ ok: true })
   })
 

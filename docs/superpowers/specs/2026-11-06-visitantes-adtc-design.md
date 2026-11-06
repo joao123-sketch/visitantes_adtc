@@ -33,7 +33,7 @@ Três acessos, cada um com um código (PIN):
 2. **Recepção (~10 pessoas ao mesmo tempo):** um PIN compartilhado. Na primeira entrada o app pede só o primeiro nome do recepcionista, uma vez, para registrar quem anotou cada visitante.
 3. **Apresentador:** PIN próprio. Vê a lista e marca quem já foi apresentado.
 
-PINs são trocáveis pelo administrador (por exemplo, se vazarem).
+Os códigos têm de 3 a 8 números (João pediu códigos curtos, por exemplo 111, 222 e 333) e não podem repetir entre acessos. PINs são trocáveis pelo administrador (por exemplo, se vazarem).
 
 ## Eventos
 
@@ -56,8 +56,8 @@ Exemplo real: "João, Maria e Carlos da ADTC em Ipueiras" vira um registro com c
 
 ## Lista do apresentador
 
-- Grupos em cartões, na ordem de chegada, cada um com "Cidade · Igreja" e suas pessoas.
-- Cada pessoa tem uma caixinha. Ao marcar, o nome fica riscado. Não há botão "já apresentei".
+- Blocos por cidade e, dentro de cada cidade, blocos por igreja (na ordem em que chegaram; cidade e igreja iguais por acento/caixa ficam no mesmo bloco). Dentro de cada bloco de igreja ficam os grupos, cada um com seus nomes.
+- Cada grupo tem uma única caixinha, centralizada na vertical, e o cartão do grupo inteiro é a área de toque. Ao marcar, todos os nomes do grupo ficam riscados. Não há caixinha por pessoa nem botão "já apresentei". O grupo conta como apresentado quando todas as pessoas dele estão marcadas; se alguém for adicionado depois por edição, o grupo volta a ficar desmarcado. O contador mostra grupos apresentados.
 - Quem foi apresentado permanece no mesmo lugar, só riscado (não vai para o fim da lista).
 - Observações aparecem em destaque dentro do cartão.
 - A lista atualiza sozinha quando chega gente nova.
@@ -80,7 +80,7 @@ Exemplo real: "João, Maria e Carlos da ADTC em Ipueiras" vira um registro com c
 ## Segurança e acessos (escolhas do Claude)
 
 - PINs são verificados no servidor (Cloudflare Worker); o celular nunca acessa o banco diretamente com os PINs. Após validar, o servidor emite um token de sessão por papel.
-- PIN de 6 dígitos, sem limite de tentativas (decisão de João, contra a sugestão inicial do Claude). João define os PINs iniciais.
+- PIN de 3 a 8 dígitos, sem limite de tentativas (decisão de João, contra a sugestão inicial do Claude; com 3 dígitos há só 1000 combinações). João define os PINs iniciais. Trocar um PIN encerra as sessões antigas daquele acesso.
 - A tela de administrador fica no próprio app, protegida pelo PIN de administrador.
 
 ## Eventos: casos de borda (escolhas do Claude)
@@ -104,7 +104,7 @@ A internet da igreja (Wi-Fi e dados móveis) falha com frequência.
 
 ## Visual
 
-- Layout limpo, estilo de app para iPhone/Android: fundo claro, cartões com cantos arredondados, títulos grandes, botão principal verde "Enviar", barra de navegação inferior simples. Há mockups de referência em `.superpowers/brainstorm/616-1794000340/content/telas-v2.html` (rascunho de estrutura, não de acabamento).
+- Layout elegante e moderno (referência: print enviado por João): fundo creme quente, cartões brancos com borda suave e cantos arredondados, rótulos em maiúsculas pequenas, laranja-ferrugem como cor principal, barra de ação fixa embaixo na recepção, fonte Poppins. Sem barra de título no topo: só os ícones de tema e de sair. O seletor de tema usa apenas ícones (automático, claro, escuro). Acessível: contraste AA, alvos de toque de 48 px, foco visível, rótulos para leitor de tela, respeita "reduzir movimento". Há mockups de referência em `.superpowers/brainstorm/616-1794000340/content/telas-v2.html` (rascunho de estrutura, não de acabamento).
 - Identidade da igreja: logo em `Logo/images.jpg` (ADTC Guaraciaba do Norte). Paleta derivada da logo: azul do livro, vermelho e laranja da chama, verde do globo. Logo no topo do app e como ícone instalável.
 - O acabamento visual final é feito na construção; João achou o rascunho "feio" e espera refinamento com a identidade da igreja.
 

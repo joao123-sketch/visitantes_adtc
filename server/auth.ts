@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'reception' | 'presenter'
-export type TokenPayload = { role: Role; deviceId: string; name?: string }
+export type TokenPayload = { role: Role; deviceId: string; name?: string; ph?: string }
 type Signed = TokenPayload & { exp: number }
 
 const enc = new TextEncoder()

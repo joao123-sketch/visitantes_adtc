@@ -38,17 +38,17 @@ export function Admin() {
   return (
     <>
       <h1>Administração</h1>
-      {notice && <div className={`banner ${notice.ok ? 'ok' : 'err'}`}>{notice.text}</div>}
+      {notice && <div role="status" aria-live="polite"><div className={`banner ${notice.ok ? 'ok' : 'err'}`}>{notice.text}</div></div>}
 
       <div className="card">
-        <strong>Evento aberto</strong>
+        <div className="card-title">Evento aberto</div>
         {open ? (
           <>
             <p>
               {open.name} · {open.event_date}
             </p>
             <button
-              className="btn blue"
+              className="btn"
               onClick={() => confirm('Encerrar este evento?') && run(() => api(`/api/events/${open.id}/close`, { method: 'POST' }), 'Evento encerrado.')}
             >
               Encerrar evento
@@ -78,7 +78,7 @@ export function Admin() {
       </div>
 
       <div className="card">
-        <strong>Eventos anteriores</strong>
+        <div className="card-title">Eventos anteriores</div>
         {events.filter((e) => e.status === 'closed').length === 0 && <p className="sub">Nenhum.</p>}
         {events
           .filter((e) => e.status === 'closed')
@@ -88,7 +88,7 @@ export function Admin() {
                 {e.name} · {e.event_date}
               </span>
               {!open && (
-                <button className="btn ghost small" onClick={() => run(() => api(`/api/events/${e.id}/reopen`, { method: 'POST' }), 'Evento reaberto.')}>
+                <button className="btn secondary small" onClick={() => run(() => api(`/api/events/${e.id}/reopen`, { method: 'POST' }), 'Evento reaberto.')}>
                   Reabrir
                 </button>
               )}
@@ -97,7 +97,7 @@ export function Admin() {
       </div>
 
       <div className="card">
-        <strong>Códigos de acesso (PIN)</strong>
+        <div className="card-title">Códigos de acesso</div>
         {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
           <div key={r}>
             <label htmlFor={`pin-${r}`}>{ROLE_LABEL[r]}</label>
@@ -105,14 +105,14 @@ export function Admin() {
               <input
                 id={`pin-${r}`}
                 inputMode="numeric"
-                maxLength={6}
-                placeholder="Novo código de 6 dígitos"
+                maxLength={8}
+                placeholder="3 a 8 números"
                 value={pins[r]}
                 onChange={(e) => setPins({ ...pins, [r]: e.target.value.replace(/\D/g, '') })}
               />
               <button
                 className="btn small"
-                disabled={pins[r].length !== 6}
+                disabled={pins[r].length < 3}
                 onClick={() =>
                   run(async () => {
                     await api(`/api/pins/${r}`, { method: 'PUT', body: { pin: pins[r] } })
