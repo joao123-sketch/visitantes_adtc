@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["vite/client", "@cloudflare/workers-types", "node"]
   },
-  "include": ["src", "server", "functions", "scripts", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "server", "worker", "scripts", "vite.config.ts", "vitest.config.ts"]
 }

@@ -20,15 +20,17 @@ PINs de teste do servidor local: admin `111111`, recepção `222222`, apresentad
 npm test
 ```
 
-## Publicar na Cloudflare Pages
+## Publicar na Cloudflare (Worker com arquivos estáticos)
 
-1. Cloudflare > Workers & Pages > Create > Pages > Connect to Git > repositório `visitantes_adtc`.
-2. Build command: `npm run build`. Output directory: `dist`.
-3. Em Settings > Variables and Secrets (Production), criar como **Secret**:
+1. Cloudflare > Workers & Pages > Create > Import a repository > `visitantes_adtc`.
+2. Settings > Builds: Build command `npm run build`; Deploy command `npx wrangler deploy`.
+3. Settings > Variables and Secrets: criar como **Secret**:
    - `SUPABASE_URL`: Supabase > Project Settings > API > Project URL
-   - `SUPABASE_SERVICE_KEY`: Supabase > Project Settings > API > `service_role` (nunca no front-end nem no git)
+   - `SUPABASE_SERVICE_KEY`: chave `service_role` (nunca no front-end nem no git)
    - `TOKEN_SECRET`: texto aleatório longo (por exemplo, 40 caracteres)
-4. Refazer o deploy depois de criar os segredos.
+4. Refazer o deploy depois de criar os segredos. O endereço fica `visitantes-adtc.<conta>.workers.dev`.
+
+A configuração do Worker está em `wrangler.jsonc`; só as rotas `/api/*` passam pelo código em `worker/index.ts`.
 
 ## Definir os PINs iniciais
 

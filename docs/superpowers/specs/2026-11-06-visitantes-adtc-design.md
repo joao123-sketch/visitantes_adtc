@@ -111,7 +111,7 @@ A internet da igreja (Wi-Fi e dados móveis) falha com frequência.
 ## Decisões técnicas (escolhas do Claude, a serem conferidas por João)
 
 - App web instalável (PWA), com modo offline para a fila de envios pendentes.
-- Hospedagem na Cloudflare (já existe conta; deve ficar organizada para vários projetos). Endereço: o gratuito da Cloudflare (`*.pages.dev`), sem domínio próprio por enquanto (decisão de João). Escolher o nome do endereço e o `start_url`/`scope` do PWA com cuidado, pois mudar depois da instalação é ruim.
+- Hospedagem na Cloudflare (já existe conta; deve ficar organizada para vários projetos). Endereço: o gratuito da Cloudflare (`*.workers.dev`; o projeto foi criado como Worker com arquivos estáticos, não como Pages), sem domínio próprio por enquanto (decisão de João). Escolher o nome do endereço e o `start_url`/`scope` do PWA com cuidado, pois mudar depois da instalação é ruim.
 - Banco de dados no Supabase (projeto já criado e ligado ao repositório GitHub `joao123-sketch/visitantes_adtc`).
 - Atualização em tempo real da lista do apresentador (Supabase Realtime ou equivalente).
 - Escolha de framework e linguagem é do construtor, priorizando o caminho mais simples.
