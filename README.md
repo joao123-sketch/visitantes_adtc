@@ -12,7 +12,7 @@ npx tsx scripts/dev-api.ts   # API com dados em memória na porta 8788
 npm run dev                  # app na porta 5173
 ```
 
-PINs de teste do servidor local: admin `111111`, recepção `222222`, apresentador `333333`.
+PINs de teste do servidor local: admin `111`, recepção `222`, apresentador `333`.
 
 ## Testes
 
@@ -37,9 +37,9 @@ A configuração do Worker está em `wrangler.jsonc`; só as rotas `/api/*` pass
 Crie o arquivo `.dev.vars` (ignorado pelo git) com `SUPABASE_URL=...` e `SUPABASE_SERVICE_KEY=...`, e rode:
 
 ```bash
-npx tsx scripts/set-pin.ts admin 123456
-npx tsx scripts/set-pin.ts reception 234567
-npx tsx scripts/set-pin.ts presenter 345678
+npx tsx scripts/set-pin.ts admin 111
+npx tsx scripts/set-pin.ts reception 222
+npx tsx scripts/set-pin.ts presenter 333
 ```
 
 Depois, os PINs podem ser trocados na tela de administração.
