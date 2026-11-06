@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError, type EventInfo, type GroupItem } from '../api'
 import { createQueue, PermanentError } from '../queue'
+import { formatDate } from '../format'
 
 type PendingGroup = {
   clientId: string
@@ -158,7 +159,7 @@ export function Reception() {
     <>
       <h1>{event.name}</h1>
       <p className="sub">
-        {event.event_date}
+        {formatDate(event.event_date)}
         {pending.length > 0 && <span className="tag">{pending.length} pendente(s)</span>}
       </p>
       {!online && (
@@ -179,9 +180,9 @@ export function Reception() {
       >
         <div className="card-title">{editingId ? 'Editar visitante' : 'Novo visitante'}</div>
         <label htmlFor="cidade">Cidade</label>
-        <input id="cidade" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Ex: Ipueiras" autoComplete="off" />
+        <input id="cidade" value={city} onChange={(e) => setCity(e.target.value)} autoComplete="off" />
         <label htmlFor="igreja">Igreja</label>
-        <input id="igreja" value={church} onChange={(e) => setChurch(e.target.value)} placeholder="Ex: ADTC" autoComplete="off" />
+        <input id="igreja" value={church} onChange={(e) => setChurch(e.target.value)} autoComplete="off" />
         <span className="label" id="pessoas-label">
           Pessoas
         </span>
@@ -191,7 +192,6 @@ export function Reception() {
               aria-labelledby="pessoas-label"
               aria-label={`Nome da pessoa ${i + 1}`}
               value={r.name}
-              placeholder={`Nome ${i + 1}`}
               autoComplete="off"
               onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
             />

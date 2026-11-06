@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type EventInfo, type Role } from '../api'
+import { formatDate } from '../format'
 
 const ROLE_LABEL: Record<Role, string> = {
   admin: 'Administrador',
@@ -45,7 +46,7 @@ export function Admin() {
         {open ? (
           <>
             <p>
-              {open.name} · {open.event_date}
+              {open.name} · {formatDate(open.event_date)}
             </p>
             <button
               className="btn"
@@ -58,7 +59,7 @@ export function Admin() {
           <>
             <p className="sub">Nenhum evento aberto.</p>
             <label htmlFor="ev-nome">Nome do evento</label>
-            <input id="ev-nome" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Culto de Domingo" />
+            <input id="ev-nome" value={name} onChange={(e) => setName(e.target.value)} />
             <label htmlFor="ev-data">Data</label>
             <input id="ev-data" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             <button
@@ -85,7 +86,7 @@ export function Admin() {
           .map((e) => (
             <div className="row" key={e.id} style={{ marginTop: 8 }}>
               <span style={{ flex: 1 }}>
-                {e.name} · {e.event_date}
+                {e.name} · {formatDate(e.event_date)}
               </span>
               {!open && (
                 <button className="btn secondary small" onClick={() => run(() => api(`/api/events/${e.id}/reopen`, { method: 'POST' }), 'Evento reaberto.')}>
@@ -106,7 +107,6 @@ export function Admin() {
                 id={`pin-${r}`}
                 inputMode="numeric"
                 maxLength={8}
-                placeholder="3 a 8 números"
                 value={pins[r]}
                 onChange={(e) => setPins({ ...pins, [r]: e.target.value.replace(/\D/g, '') })}
               />

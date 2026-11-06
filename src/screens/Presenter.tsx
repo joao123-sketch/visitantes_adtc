@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type EventInfo, type GroupItem } from '../api'
 import { createQueue } from '../queue'
+import { formatDate } from '../format'
 import { normalizeKey } from '../../server/normalize'
 
 type Tick = { groupId: string; presented: boolean }
@@ -80,7 +81,7 @@ export function Presenter() {
     <>
       <h1>{data.event.name}</h1>
       <p className="sub" aria-live="polite">
-        {done} de {total} grupo(s) apresentados
+        {formatDate(data.event.event_date)} · {done} de {total} grupo(s) apresentados
       </p>
       <div
         className="progress"
