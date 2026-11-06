@@ -30,6 +30,8 @@ export interface Store {
   setPin(role: string, pin_hash: string, salt: string): Promise<void>
   getOpenEvent(): Promise<EventRow | null>
   getEvent(id: string): Promise<EventRow | null>
+  /** Eventos mais recentes primeiro (até 20). */
+  listEvents(): Promise<EventRow[]>
   /** Lança OpenEventExists se já houver evento aberto. */
   createEvent(name: string, eventDate: string): Promise<EventRow>
   /** Lança OpenEventExists ao reabrir com outro evento aberto. */

@@ -57,6 +57,15 @@ describe('login', () => {
 })
 
 describe('eventos', () => {
+  it('admin lista eventos, o mais recente primeiro; recepção recebe 403', async () => {
+    const t = await tokenFor('admin')
+    const e1 = (await (await call('POST', '/api/events', t, { name: 'Primeiro', eventDate: '2026-11-01' })).json()) as { id: string }
+    await call('POST', `/api/events/${e1.id}/close`, t)
+    await call('POST', '/api/events', t, { name: 'Segundo', eventDate: '2026-11-08' })
+    const r = (await (await call('GET', '/api/events', t)).json()) as { events: { name: string }[] }
+    expect(r.events.map((e) => e.name)).toEqual(['Segundo', 'Primeiro'])
+    expect((await call('GET', '/api/events', await tokenFor('reception'))).status).toBe(403)
+  })
   it('admin cria evento; criar outro com um aberto devolve 409', async () => {
     const t = await tokenFor('admin')
     expect((await call('POST', '/api/events', t, { name: 'Culto', eventDate: '2026-11-08' })).status).toBe(200)

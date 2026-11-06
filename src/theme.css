@@ -1,0 +1,85 @@
+:root {
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --text: #111827;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --blue: #2a6fa8;
+  --red: #e8362b;
+  --orange: #f0601a;
+  --green: #22a45d;
+  --input: #ffffff;
+  --warn-bg: #fffbeb;
+  --warn-text: #92400e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0b1220;
+    --card: #162033;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --border: #26344d;
+    --input: #0f1a2c;
+    --warn-bg: #3a2a0a;
+    --warn-text: #fcd34d;
+  }
+}
+:root[data-theme='dark'] {
+  --bg: #0b1220;
+  --card: #162033;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --border: #26344d;
+  --input: #0f1a2c;
+  --warn-bg: #3a2a0a;
+  --warn-text: #fcd34d;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 16px; -webkit-text-size-adjust: 100%; }
+#root { max-width: 520px; margin: 0 auto; min-height: 100dvh; padding-bottom: env(safe-area-inset-bottom); }
+
+.topbar {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px;
+  padding: calc(10px + env(safe-area-inset-top)) 14px 10px; background: var(--card); border-bottom: 1px solid var(--border);
+}
+.topbar img { width: 36px; height: 36px; border-radius: 8px; }
+.topbar .title { font-weight: 700; flex: 1; line-height: 1.1; }
+.topbar .title small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+.chip { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 999px; padding: 6px 10px; font-size: 13px; }
+
+main { padding: 14px; }
+h1 { font-size: 22px; margin: 4px 0; }
+.sub { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+input, textarea, select {
+  width: 100%; font: inherit; color: var(--text); background: var(--input);
+  border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px;
+}
+textarea { min-height: 60px; resize: vertical; }
+.row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.row input { flex: 1; }
+.btn { width: 100%; border: 0; border-radius: 10px; padding: 14px; font: inherit; font-weight: 700; color: #fff; background: var(--green); margin-top: 12px; }
+.btn.blue { background: var(--blue); }
+.btn.ghost { background: transparent; color: var(--blue); border: 1px solid var(--border); }
+.btn.small { width: auto; padding: 8px 12px; margin: 0; font-size: 14px; }
+.btn:disabled { opacity: .5; }
+.link { background: none; border: 0; color: var(--blue); font: inherit; font-weight: 600; padding: 6px 0; }
+.x { background: none; border: 0; color: var(--muted); font-size: 20px; padding: 6px 10px; }
+
+.group-title { color: var(--blue); font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.person { display: flex; align-items: center; gap: 12px; padding: 10px 0; font-size: 18px; }
+.person input[type='checkbox'] { width: 24px; height: 24px; accent-color: var(--green); flex: none; }
+.person.done span { text-decoration: line-through; color: var(--muted); }
+.obs { background: var(--warn-bg); color: var(--warn-text); border-radius: 8px; padding: 6px 10px; font-size: 14px; margin-top: 4px; }
+.tag { font-size: 12px; background: var(--orange); color: #fff; border-radius: 6px; padding: 2px 6px; margin-left: 6px; }
+.banner { border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; font-size: 14px; background: var(--warn-bg); color: var(--warn-text); }
+.banner.ok { background: #dcfce7; color: #166534; }
+.banner.err { background: #fee2e2; color: #991b1b; }
+.empty { text-align: center; color: var(--muted); padding: 40px 10px; }
+.actions { display: flex; gap: 14px; margin-top: 6px; }
+.login { padding-top: 40px; text-align: center; }
+.login img { width: 120px; border-radius: 20px; margin-bottom: 8px; }
+.pin { text-align: center; letter-spacing: 8px; font-size: 24px; }

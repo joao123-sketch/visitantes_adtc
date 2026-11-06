@@ -25,6 +25,9 @@ export function memoryStore(): Store {
     async getEvent(eid) {
       return events.find((e) => e.id === eid) ?? null
     },
+    async listEvents() {
+      return [...events].reverse().slice(0, 20)
+    },
     async createEvent(name, event_date) {
       if (events.some((e) => e.status === 'open')) throw new OpenEventExists()
       const e: EventRow = { id: id(), name, event_date, status: 'open' }

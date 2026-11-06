@@ -61,6 +61,8 @@ export function createApp(store: Store, secret: string) {
   // ---------- eventos ----------
   app.get('/api/events/current', async (c) => c.json({ event: await store.getOpenEvent() }))
 
+  app.get('/api/events', only('admin'), async (c) => c.json({ events: await store.listEvents() }))
+
   app.post('/api/events', only('admin'), async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const name = text(body.name)
