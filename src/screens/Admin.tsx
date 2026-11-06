@@ -13,6 +13,7 @@ export function Admin() {
   const [name, setName] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [pins, setPins] = useState<Record<Role, string>>({ admin: '', reception: '', presenter: '' })
+  const [confirmClose, setConfirmClose] = useState(false)
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
 
   const load = useCallback(async () => {
@@ -48,12 +49,27 @@ export function Admin() {
             <p>
               {open.name} · {formatDate(open.event_date)}
             </p>
-            <button
-              className="btn"
-              onClick={() => confirm('Encerrar este evento?') && run(() => api(`/api/events/${open.id}/close`, { method: 'POST' }), 'Evento encerrado.')}
-            >
-              Encerrar evento
-            </button>
+            {!confirmClose ? (
+              <button className="btn" onClick={() => setConfirmClose(true)}>
+                Encerrar evento
+              </button>
+            ) : (
+              <div role="alertdialog" aria-label="Confirmar encerramento do evento">
+                <div className="banner">Encerrar este evento? A recepção não poderá mais editar nem apagar os envios.</div>
+                <button
+                  className="btn"
+                  onClick={async () => {
+                    setConfirmClose(false)
+                    await run(() => api(`/api/events/${open.id}/close`, { method: 'POST' }), 'Evento encerrado.')
+                  }}
+                >
+                  Sim, encerrar
+                </button>
+                <button className="btn secondary" onClick={() => setConfirmClose(false)}>
+                  Cancelar
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <>

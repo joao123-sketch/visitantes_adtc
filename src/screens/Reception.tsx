@@ -29,6 +29,7 @@ export function Reception() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice>(null)
   const [online, setOnline] = useState(true)
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -130,7 +131,7 @@ export function Reception() {
   }
 
   async function remove(g: GroupItem) {
-    if (!confirm(`Apagar ${g.people.map((p) => p.name).join(', ')}?`)) return
+    setConfirmingId(null)
     try {
       await api(`/api/groups/${g.id}`, { method: 'DELETE' })
       await refresh()
@@ -238,9 +239,20 @@ export function Reception() {
             <button className="link" onClick={() => startEdit(g)}>
               Editar
             </button>
-            <button className="link danger" onClick={() => remove(g)}>
-              Apagar
-            </button>
+            {confirmingId === g.id ? (
+              <>
+                <button className="link danger" onClick={() => remove(g)}>
+                  Sim, apagar
+                </button>
+                <button className="link" onClick={() => setConfirmingId(null)}>
+                  Cancelar
+                </button>
+              </>
+            ) : (
+              <button className="link danger" onClick={() => setConfirmingId(g.id)}>
+                Apagar
+              </button>
+            )}
           </div>
         </div>
       ))}
