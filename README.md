@@ -23,7 +23,7 @@ npm test
 ## Publicar na Cloudflare (Worker com arquivos estáticos)
 
 1. Cloudflare > Workers & Pages > Create > Import a repository > `visitantes_adtc`.
-2. Settings > Builds: Build command `npm run build`; Deploy command `npx wrangler deploy`.
+2. Settings > Builds: Deploy command `npx wrangler deploy` (o build roda sozinho, configurado em `wrangler.jsonc`).
 3. Settings > Variables and Secrets: criar como **Secret**:
    - `SUPABASE_URL`: Supabase > Project Settings > API > Project URL
    - `SUPABASE_SERVICE_KEY`: chave `service_role` (nunca no front-end nem no git)
