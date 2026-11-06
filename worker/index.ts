@@ -11,7 +11,10 @@ const failure = (detail: string) => Response.json({ error: 'Erro no servidor', d
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const missing = REQUIRED.filter((name) => !env?.[name])
-    if (missing.length > 0) return failure(`Faltam variáveis na Cloudflare: ${missing.join(', ')}`)
+    if (missing.length > 0) {
+      const received = Object.keys(env ?? {}).join(', ') || 'nenhuma' // só os nomes, nunca os valores
+      return failure(`Faltam variáveis na Cloudflare: ${missing.join(', ')}. O Worker recebeu: ${received}`)
+    }
     try {
       return await createApp(supabaseStore(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY), env.TOKEN_SECRET).fetch(request)
     } catch (e) {

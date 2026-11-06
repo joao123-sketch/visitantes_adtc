@@ -9,12 +9,14 @@ describe('worker', () => {
     expect(r.status).toBe(500)
     expect(await r.json()).toEqual({
       error: 'Erro no servidor',
-      detail: 'Faltam variáveis na Cloudflare: SUPABASE_URL, SUPABASE_SERVICE_KEY, TOKEN_SECRET',
+      detail: 'Faltam variáveis na Cloudflare: SUPABASE_URL, SUPABASE_SERVICE_KEY, TOKEN_SECRET. O Worker recebeu: nenhuma',
     })
   })
   it('lista só as que faltam', async () => {
     const r = await worker.fetch(req(), { SUPABASE_URL: 'https://x.supabase.co' } as never)
-    expect(((await r.json()) as { detail: string }).detail).toBe('Faltam variáveis na Cloudflare: SUPABASE_SERVICE_KEY, TOKEN_SECRET')
+    expect(((await r.json()) as { detail: string }).detail).toBe(
+      'Faltam variáveis na Cloudflare: SUPABASE_SERVICE_KEY, TOKEN_SECRET. O Worker recebeu: SUPABASE_URL',
+    )
   })
   it('chave de banco inválida vira JSON 500 e não derruba o Worker', async () => {
     const r = await worker.fetch(req(), { SUPABASE_URL: 'não é uma url', SUPABASE_SERVICE_KEY: 'x', TOKEN_SECRET: 'y' } as never)
