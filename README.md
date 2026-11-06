@@ -24,9 +24,8 @@ npm test
 
 1. Cloudflare > Workers & Pages > Create > Import a repository > `visitantes_adtc`.
 2. Settings > Builds: Deploy command `npx wrangler deploy` (o build roda sozinho, configurado em `wrangler.jsonc`).
-3. Settings > Variables and Secrets: criar como **Secret**:
-   - `SUPABASE_URL`: Supabase > Project Settings > API > Project URL
-   - `SUPABASE_SERVICE_KEY`: chave `service_role` (nunca no front-end nem no git)
+3. `SUPABASE_URL` já está em `wrangler.jsonc` (não é segredo). Em Settings > Variables and Secrets, criar só estes dois como **Secret**:
+   - `SUPABASE_SERVICE_KEY`: chave secreta `sb_secret_...` (Supabase > Project Settings > API Keys > Secret keys; nunca no front-end nem no git)
    - `TOKEN_SECRET`: texto aleatório longo (por exemplo, 40 caracteres)
 4. Refazer o deploy depois de criar os segredos. O endereço fica `visitantes-adtc.<conta>.workers.dev`.
 
