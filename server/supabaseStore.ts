@@ -27,6 +27,9 @@ export function supabaseStore(url: string, serviceKey: string): Store {
     async listEvents() {
       return must(await db.from('events').select('*').order('created_at', { ascending: false }).limit(20)) as EventRow[]
     },
+    async deleteEvent(id) {
+      must(await db.from('events').delete().eq('id', id)) // grupos e pessoas saem junto (on delete cascade)
+    },
     async createEvent(name, eventDate) {
       const res = await db.from('events').insert({ name, event_date: eventDate }).select('*').single()
       if (res.error?.code === UNIQUE_VIOLATION) throw new OpenEventExists()

@@ -32,6 +32,8 @@ export interface Store {
   getEvent(id: string): Promise<EventRow | null>
   /** Eventos mais recentes primeiro (até 20). */
   listEvents(): Promise<EventRow[]>
+  /** Apaga o evento e, junto, todos os grupos e pessoas dele. */
+  deleteEvent(id: string): Promise<void>
   /** Lança OpenEventExists se já houver evento aberto. */
   createEvent(name: string, eventDate: string): Promise<EventRow>
   /** Lança OpenEventExists ao reabrir com outro evento aberto. */

@@ -14,6 +14,7 @@ export function Admin() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [pins, setPins] = useState<Record<Role, string>>({ admin: '', reception: '', presenter: '' })
   const [confirmClose, setConfirmClose] = useState(false)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
 
   const load = useCallback(async () => {
@@ -36,6 +37,27 @@ export function Admin() {
   }
 
   const open = events.find((e) => e.status === 'open')
+
+  // Confirmação dentro do app (a janela nativa do navegador pode ser bloqueada).
+  const deleteBox = (ev: EventInfo) => (
+    <div role="alertdialog" aria-label={`Confirmar exclusão do evento ${ev.name}`}>
+      <div className="banner err">
+        Excluir “{ev.name}” e todos os visitantes dele? Não dá para desfazer.
+      </div>
+      <button
+        className="btn"
+        onClick={async () => {
+          setConfirmDeleteId(null)
+          await run(() => api(`/api/events/${ev.id}`, { method: 'DELETE' }), 'Evento excluído.')
+        }}
+      >
+        Sim, excluir
+      </button>
+      <button className="btn secondary" onClick={() => setConfirmDeleteId(null)}>
+        Cancelar
+      </button>
+    </div>
+  )
 
   return (
     <>
@@ -70,6 +92,13 @@ export function Admin() {
                 </button>
               </div>
             )}
+            {confirmDeleteId === open.id ? (
+              deleteBox(open)
+            ) : (
+              <button className="btn secondary" onClick={() => setConfirmDeleteId(open.id)}>
+                Excluir evento
+              </button>
+            )}
           </>
         ) : (
           <>
@@ -100,15 +129,23 @@ export function Admin() {
         {events
           .filter((e) => e.status === 'closed')
           .map((e) => (
-            <div className="row" key={e.id} style={{ marginTop: 8 }}>
-              <span style={{ flex: 1 }}>
-                {e.name} · {formatDate(e.event_date)}
-              </span>
-              {!open && (
-                <button className="btn secondary small" onClick={() => run(() => api(`/api/events/${e.id}/reopen`, { method: 'POST' }), 'Evento reaberto.')}>
-                  Reabrir
-                </button>
-              )}
+            <div key={e.id} style={{ marginTop: 10 }}>
+              <div className="row" style={{ marginBottom: 0 }}>
+                <span style={{ flex: 1 }}>
+                  {e.name} · {formatDate(e.event_date)}
+                </span>
+                {!open && (
+                  <button className="btn secondary small" onClick={() => run(() => api(`/api/events/${e.id}/reopen`, { method: 'POST' }), 'Evento reaberto.')}>
+                    Reabrir
+                  </button>
+                )}
+                {confirmDeleteId !== e.id && (
+                  <button className="btn secondary small" aria-label={`Excluir o evento ${e.name}`} onClick={() => setConfirmDeleteId(e.id)}>
+                    Excluir
+                  </button>
+                )}
+              </div>
+              {confirmDeleteId === e.id && <div style={{ marginTop: 8 }}>{deleteBox(e)}</div>}
             </div>
           ))}
       </div>

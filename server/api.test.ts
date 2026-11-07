@@ -375,6 +375,56 @@ describe('revisão final', () => {
   })
 })
 
+describe('excluir eventos', () => {
+  it('admin exclui um evento encerrado e ele some da lista', async () => {
+    const adm = await tokenFor('admin')
+    const eid = await openEvent()
+    await call('POST', `/api/events/${eid}/close`, adm)
+    expect((await call('DELETE', `/api/events/${eid}`, adm)).status).toBe(200)
+    const r = (await (await call('GET', '/api/events', adm)).json()) as { events: unknown[] }
+    expect(r.events).toHaveLength(0)
+  })
+  it('excluir o evento apaga também os visitantes dele', async () => {
+    const adm = await tokenFor('admin')
+    const rec = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    const eid = await openEvent()
+    await submit(rec, eid, ['Ana', 'Bia'])
+    await call('DELETE', `/api/events/${eid}`, adm)
+    expect(await store.listGroups(eid)).toEqual([])
+    expect(await store.listPeople(eid)).toEqual([])
+    expect((await getList(eid, pres)).groups).toEqual([])
+  })
+  it('excluir o evento aberto libera para abrir outro', async () => {
+    const adm = await tokenFor('admin')
+    const eid = await openEvent()
+    expect((await call('DELETE', `/api/events/${eid}`, adm)).status).toBe(200)
+    expect((await call('POST', '/api/events', adm, { name: 'Novo', eventDate: '2026-11-15' })).status).toBe(200)
+  })
+  it('excluir só atinge o evento escolhido', async () => {
+    const adm = await tokenFor('admin')
+    const rec = await tokenFor('reception')
+    const e1 = await openEvent()
+    await submit(rec, e1, ['Ana'])
+    await call('POST', `/api/events/${e1}/close`, adm)
+    const e2 = ((await (await call('POST', '/api/events', adm, { name: 'Outro', eventDate: '2026-11-15' })).json()) as { id: string }).id
+    await submit(rec, e2, ['Bia'])
+    await call('DELETE', `/api/events/${e1}`, adm)
+    expect((await store.listPeople(e2)).map((p) => p.name)).toEqual(['Bia'])
+    expect(await store.getEvent(e2)).not.toBeNull()
+  })
+  it('recepção e apresentador não excluem (403)', async () => {
+    const eid = await openEvent()
+    expect((await call('DELETE', `/api/events/${eid}`, await tokenFor('reception'))).status).toBe(403)
+    expect((await call('DELETE', `/api/events/${eid}`, await tokenFor('presenter'))).status).toBe(403)
+    expect(await store.getEvent(eid)).not.toBeNull()
+  })
+  it('evento que não existe devolve 404', async () => {
+    const adm = await tokenFor('admin')
+    expect((await call('DELETE', '/api/events/nao-existe', adm)).status).toBe(404)
+  })
+})
+
 describe('apresentador', () => {
   it('lista em ordem de chegada', async () => {
     const eid = await openEvent()

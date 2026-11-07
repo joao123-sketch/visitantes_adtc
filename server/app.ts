@@ -84,6 +84,13 @@ export function createApp(store: Store, secret: string) {
     }
   })
 
+  app.delete('/api/events/:id', only('admin'), async (c) => {
+    const id = c.req.param('id') ?? ''
+    if (!(await store.getEvent(id))) return c.json({ error: 'Evento não encontrado' }, 404)
+    await store.deleteEvent(id)
+    return c.json({ ok: true })
+  })
+
   app.post('/api/events/:id/close', only('admin'), async (c) => {
     await store.setEventStatus(c.req.param('id') ?? '', 'closed')
     return c.json({ ok: true })

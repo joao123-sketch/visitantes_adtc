@@ -28,6 +28,12 @@ export function memoryStore(): Store {
     async listEvents() {
       return [...events].reverse().slice(0, 20)
     },
+    async deleteEvent(eid) {
+      const i = events.findIndex((e) => e.id === eid)
+      if (i >= 0) events.splice(i, 1)
+      for (let j = groups.length - 1; j >= 0; j--) if (groups[j].event_id === eid) groups.splice(j, 1)
+      for (let j = people.length - 1; j >= 0; j--) if (people[j].event_id === eid) people.splice(j, 1)
+    },
     async createEvent(name, event_date) {
       if (events.some((e) => e.status === 'open')) throw new OpenEventExists()
       const e: EventRow = { id: id(), name, event_date, status: 'open' }
