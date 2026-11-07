@@ -1,0 +1,9 @@
+﻿# Fora do grafo: imagens, fontes, logo, builds e dados de testes locais
+Logo/
+Poppins/
+public/
+dist/
+.wrangler/
+.superpowers/
+package-lock.json
+supabase/
