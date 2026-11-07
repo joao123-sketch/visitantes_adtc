@@ -2,11 +2,15 @@ import { Hono } from 'hono'
 import type { Context, Next } from 'hono'
 import { hashPin, signToken, verifyToken, type Role, type TokenPayload } from './auth'
 import { normalizeKey } from './normalize'
-import { OpenEventExists, type PersonRow, type Store } from './store'
+import { findPinConflict, rolesMatchingPin, ROLES } from './pins'
+import { OpenEventExists, UniqueViolation, type PersonRow, type Store } from './store'
 
 type Env = { Variables: { user: TokenPayload } }
 
-const ROLES: Role[] = ['admin', 'reception', 'presenter']
+/** O fingerprint do PIN de cada papel é guardado por alguns segundos para não consultar o banco a cada requisição. */
+const PIN_CACHE_MS = 10_000
+export type PinCache = Map<Role, { ph: string | null; at: number }>
+export type AppOptions = { now?: () => number; pinCache?: PinCache }
 
 const cleanNames = (names: unknown): string[] =>
   Array.isArray(names)
@@ -22,22 +26,33 @@ function mergeObservation(current: string | null, extra: string | null | undefin
   return current.toLowerCase().includes(add.toLowerCase()) ? current : `${current} · ${add}`
 }
 
-export function createApp(store: Store, secret: string) {
+export function createApp(store: Store, secret: string, opts: AppOptions = {}) {
   const app = new Hono<Env>()
+  const now = opts.now ?? Date.now
+  const pinCache: PinCache = opts.pinCache ?? new Map()
 
-  // Falhas internas (ex.: banco indisponível ou chave errada) viram JSON legível em vez de texto solto.
+  // Falhas internas viram JSON genérico; o motivo real vai só para o log do servidor.
   app.onError((err, c) => {
     console.error(err)
-    return c.json({ error: 'Erro no servidor', detail: String(err?.message ?? err).slice(0, 200) }, 500)
+    return c.json({ error: 'Erro no servidor' }, 500)
   })
+
+  const currentPh = async (role: Role): Promise<string | null> => {
+    const hit = pinCache.get(role)
+    if (hit && now() - hit.at < PIN_CACHE_MS) return hit.ph
+    const row = await store.getPin(role)
+    const ph = row ? row.pin_hash.slice(0, 16) : null
+    pinCache.set(role, { ph, at: now() })
+    return ph
+  }
 
   const auth = async (c: Context<Env>, next: Next) => {
     const header = c.req.header('authorization') ?? ''
     const token = header.startsWith('Bearer ') ? header.slice(7) : ''
     const user = token ? await verifyToken(token, secret) : null
     if (!user) return c.json({ error: 'Sessão inválida' }, 401)
-    const pin = await store.getPin(user.role)
-    if (!pin || pin.pin_hash.slice(0, 16) !== user.ph) return c.json({ error: 'Sessão inválida' }, 401)
+    const ph = await currentPh(user.role)
+    if (!ph || ph !== user.ph) return c.json({ error: 'Sessão inválida' }, 401)
     c.set('user', user)
     await next()
   }
@@ -53,15 +68,15 @@ export function createApp(store: Store, secret: string) {
     const pin = String(body.pin ?? '')
     const deviceId = String(body.deviceId ?? '')
     if (!deviceId) return c.json({ error: 'Aparelho não identificado' }, 400)
-    for (const role of ROLES) {
-      const row = await store.getPin(role)
-      if (row && (await hashPin(pin, row.salt)) === row.pin_hash) {
-        const name = body.name ? text(body.name) : undefined
-        const token = await signToken({ role, deviceId, name, ph: row.pin_hash.slice(0, 16) }, secret)
-        return c.json({ token, role })
-      }
+    const matches = await rolesMatchingPin(store, pin)
+    if (matches.length > 1) {
+      return c.json({ error: 'Esse código está repetido em mais de um acesso. Fale com o administrador.' }, 409)
     }
-    return c.json({ error: 'PIN incorreto' }, 401)
+    if (matches.length === 0) return c.json({ error: 'PIN incorreto' }, 401)
+    const { role, pin_hash } = matches[0]
+    const name = body.name ? text(body.name) : undefined
+    const token = await signToken({ role, deviceId, name, ph: pin_hash.slice(0, 16) }, secret)
+    return c.json({ token, role })
   })
 
   app.use('/api/*', async (c, next) => (c.req.path === '/api/login' ? next() : auth(c, next)))
@@ -112,27 +127,48 @@ export function createApp(store: Store, secret: string) {
     const pin = String(body.pin ?? '')
     if (!ROLES.includes(role)) return c.json({ error: 'Papel inválido' }, 400)
     if (!/^\d{3,8}$/.test(pin)) return c.json({ error: 'O código precisa ter de 3 a 8 números' }, 400)
-    for (const other of ROLES.filter((r) => r !== role)) {
-      const row = await store.getPin(other)
-      if (row && (await hashPin(pin, row.salt)) === row.pin_hash)
-        return c.json({ error: 'Esse código já é usado por outro acesso' }, 409)
-    }
+    if (await findPinConflict(store, role, pin)) return c.json({ error: 'Esse código já é usado por outro acesso' }, 409)
     const salt = crypto.randomUUID()
     await store.setPin(role, await hashPin(pin, salt), salt)
+    pinCache.delete(role) // as sessões antigas deste acesso deixam de valer já
     return c.json({ ok: true })
   })
 
-  // ---------- visitantes (recepção) ----------
-  const withPeople = async (groupIds: string[], eventId: string) => {
-    const people = await store.listPeople(eventId)
-    const byGroup = new Map<string, PersonRow[]>()
-    for (const p of people) byGroup.set(p.group_id, [...(byGroup.get(p.group_id) ?? []), p])
-    return (id: string) =>
-      (byGroup.get(id) ?? [])
-        .sort((a, b) => a.created_at.localeCompare(b.created_at))
-        .map((p) => ({ id: p.id, name: p.name, presented: p.presented }))
+  // ---------- listagens (recepção e apresentador) ----------
+  /** Evento pedido (`?eventId=`) ou, sem parâmetro, o evento aberto. Assim a tela precisa de uma chamada só. */
+  const resolveEvent = (c: Context<Env>) => {
+    const id = c.req.query('eventId')
+    return id ? store.getEvent(id) : store.getOpenEvent()
   }
 
+  /** Grupos do evento com suas pessoas, em ordem de chegada; `deviceId` limita aos envios daquele aparelho. */
+  const listGroups = async (eventId: string, deviceId?: string) => {
+    const groups = (await store.listGroups(eventId))
+      .filter((g) => !deviceId || g.device_id === deviceId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    const byGroup = new Map<string, PersonRow[]>()
+    for (const p of await store.listPeople(eventId)) byGroup.set(p.group_id, [...(byGroup.get(p.group_id) ?? []), p])
+    return groups.map((g) => ({
+      id: g.id,
+      city: g.city,
+      church: g.church,
+      observation: g.observation,
+      people: (byGroup.get(g.id) ?? [])
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .map((p) => ({ id: p.id, name: p.name, presented: p.presented })),
+    }))
+  }
+
+  const listing = (deviceOnly: boolean) => async (c: Context<Env>) => {
+    const event = await resolveEvent(c)
+    if (!event) return c.json({ event: null, groups: [] })
+    return c.json({ event, groups: await listGroups(event.id, deviceOnly ? c.get('user').deviceId : undefined) })
+  }
+
+  app.get('/api/groups/mine', only('reception'), listing(true))
+  app.get('/api/list', only('presenter', 'admin'), listing(false))
+
+  // ---------- visitantes (recepção) ----------
   app.post('/api/groups', only('reception'), async (c) => {
     const user = c.get('user')
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
@@ -145,67 +181,58 @@ export function createApp(store: Store, secret: string) {
     if (names.length === 0) return c.json({ error: 'Informe pelo menos um nome' }, 400)
     if (!(await store.getEvent(eventId))) return c.json({ error: 'Evento não encontrado' }, 404)
 
-    // Reenvio seguro: reaproveita o grupo e refaz só o que faltou (a chave única impede duplicar).
-    const group =
-      (await store.findGroupByClient(eventId, clientId)) ??
-      (await store.insertGroup({
-        event_id: eventId,
-        client_id: clientId,
-        city,
-        church,
-        observation: text(body.observation) || null,
-        device_id: user.deviceId,
-        receptionist: user.name ?? null,
-      }))
-    const added: string[] = []
-    const duplicates: string[] = []
+    // Mesmo nome duas vezes no mesmo envio conta uma vez.
     const seen = new Set<string>()
-    const cityKey = normalizeKey(city)
-    const churchKey = normalizeKey(church)
+    const unique: { name: string; key: string }[] = []
     for (const name of names) {
-      const nameKey = normalizeKey(name)
-      if (seen.has(nameKey)) continue
-      seen.add(nameKey)
-      const row = await store.insertPerson({
-        group_id: group.id,
-        event_id: eventId,
-        name,
-        name_key: nameKey,
-        city_key: cityKey,
-        church_key: churchKey,
-      })
-      if (row) {
-        added.push(name)
-        continue
-      }
-      const other = await store.findPersonByKey(eventId, nameKey, cityKey, churchKey)
-      if (other && other.group_id === group.id) {
-        added.push(name) // já gravado numa tentativa anterior deste mesmo envio
-        continue
-      }
-      duplicates.push(name)
-      if (other && group.observation) {
-        const og = await store.getGroup(other.group_id)
-        if (og) {
-          const merged = mergeObservation(og.observation, group.observation)
-          if (merged !== og.observation) await store.updateGroup(og.id, { city: og.city, church: og.church, observation: merged })
-        }
+      const key = normalizeKey(name)
+      if (seen.has(key)) continue
+      seen.add(key)
+      unique.push({ name, key })
+    }
+
+    // Reenvio seguro: reaproveita o grupo e refaz só o que faltou. Se outro envio igual chegar ao mesmo tempo,
+    // o banco recusa o segundo grupo (UniqueViolation) e usamos o que o primeiro criou.
+    let group = await store.findGroupByClient(eventId, clientId)
+    if (!group) {
+      try {
+        group = await store.insertGroup({
+          event_id: eventId,
+          client_id: clientId,
+          city,
+          church,
+          observation: text(body.observation) || null,
+          device_id: user.deviceId,
+          receptionist: user.name ?? null,
+        })
+      } catch (e) {
+        if (!(e instanceof UniqueViolation)) throw e
+        group = await store.findGroupByClient(eventId, clientId)
+        if (!group) throw e
       }
     }
-    if ((await store.listPeopleByGroup(group.id)).length === 0) await store.deleteGroup(group.id)
-    return c.json({ added, duplicates })
-  })
 
-  app.get('/api/groups/mine', only('reception'), async (c) => {
-    const eventId = c.req.query('eventId') ?? ''
-    const deviceId = c.get('user').deviceId
-    const groups = (await store.listGroups(eventId))
-      .filter((g) => g.device_id === deviceId)
-      .sort((a, b) => a.created_at.localeCompare(b.created_at))
-    const peopleOf = await withPeople(groups.map((g) => g.id), eventId)
-    return c.json({
-      groups: groups.map((g) => ({ id: g.id, city: g.city, church: g.church, observation: g.observation, people: peopleOf(g.id) })),
-    })
+    const cityKey = normalizeKey(city)
+    const churchKey = normalizeKey(church)
+    await store.insertPeople(
+      unique.map((u) => ({ group_id: group.id, event_id: eventId, name: u.name, name_key: u.key, city_key: cityKey, church_key: churchKey })),
+    )
+    // Quem está neste grupo agora (gravado agora ou numa tentativa anterior) conta como adicionado; o resto já existia em outro grupo.
+    const inGroup = new Set((await store.listPeopleByGroup(group.id)).map((p) => p.name_key))
+    const added = unique.filter((u) => inGroup.has(u.key)).map((u) => u.name)
+    const duplicates = unique.filter((u) => !inGroup.has(u.key)).map((u) => u.name)
+
+    if (group.observation) {
+      for (const u of unique.filter((x) => !inGroup.has(x.key))) {
+        const other = await store.findPersonByKey(eventId, u.key, cityKey, churchKey)
+        const og = other && (await store.getGroup(other.group_id))
+        if (!og) continue
+        const merged = mergeObservation(og.observation, group.observation)
+        if (merged !== og.observation) await store.updateGroup(og.id, { city: og.city, church: og.church, observation: merged })
+      }
+    }
+    if (inGroup.size === 0) await store.deleteGroup(group.id)
+    return c.json({ added, duplicates })
   })
 
   const ownedOpenGroup = async (c: Context<Env>) => {
@@ -273,16 +300,11 @@ export function createApp(store: Store, secret: string) {
       const ok = await store.updatePerson(u.person.id, { name: u.name, name_key: u.key, city_key: cityKey, church_key: churchKey })
       if (!ok) return c.json({ error: 'Essa pessoa já está na lista' }, 409)
     }
-    for (const e of inserts) {
-      const row = await store.insertPerson({
-        group_id: group.id,
-        event_id: group.event_id,
-        name: e.name,
-        name_key: normalizeKey(e.name),
-        city_key: cityKey,
-        church_key: churchKey,
-      })
-      if (!row) return c.json({ error: 'Essa pessoa já está na lista' }, 409)
+    if (inserts.length > 0) {
+      const added = await store.insertPeople(
+        inserts.map((e) => ({ group_id: group.id, event_id: group.event_id, name: e.name, name_key: normalizeKey(e.name), city_key: cityKey, church_key: churchKey })),
+      )
+      if (added.length !== inserts.length) return c.json({ error: 'Essa pessoa já está na lista' }, 409)
     }
     for (const p of toRemove) if (!clashesRemoved.includes(p.id)) await store.deletePerson(p.id)
     await store.updateGroup(group.id, { city, church, observation: text(body.observation) || null })
@@ -297,25 +319,9 @@ export function createApp(store: Store, secret: string) {
   })
 
   // ---------- apresentador ----------
-  app.get('/api/list', only('presenter', 'admin'), async (c) => {
-    const eventId = c.req.query('eventId') ?? ''
-    const groups = (await store.listGroups(eventId)).sort((a, b) => a.created_at.localeCompare(b.created_at))
-    const peopleOf = await withPeople(groups.map((g) => g.id), eventId)
-    return c.json({
-      groups: groups.map((g) => ({ id: g.id, city: g.city, church: g.church, observation: g.observation, people: peopleOf(g.id) })),
-    })
-  })
-
-  app.put('/api/people/:id/presented', only('presenter', 'admin'), async (c) => {
-    const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
-    await store.setPresented(c.req.param('id') ?? '', body.presented === true)
-    return c.json({ ok: true })
-  })
-
   app.put('/api/groups/:id/presented', only('presenter', 'admin'), async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
-    const presented = body.presented === true
-    await store.setGroupPresented(c.req.param('id') ?? '', presented)
+    await store.setGroupPresented(c.req.param('id') ?? '', body.presented === true)
     return c.json({ ok: true })
   })
 

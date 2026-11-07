@@ -1,24 +1,28 @@
-import { useEffect, useMemo, useState } from 'react'
-import { api, type EventInfo, type GroupItem } from '../api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { api } from '../api'
 import { createQueue } from '../queue'
 import { createSerialRunner } from '../serialRunner'
 import { addTick, syncPresenter, type Cached, type Tick } from '../presenterSync'
 import { formatDate } from '../format'
+import { OfflinePill, Skeleton } from '../ui'
 import { normalizeKey } from '../../server/normalize'
 
 const ticks = createQueue<Tick>('pending-group-ticks', (t) => t.groupId)
 const CACHE = 'last-list'
 
-const loadCache = (): Cached => {
+const loadCache = (): Cached | null => {
   try {
-    return JSON.parse(localStorage.getItem(CACHE) ?? '') as Cached
+    const v = JSON.parse(localStorage.getItem(CACHE) ?? '') as Cached
+    return v && Array.isArray(v.groups) ? v : null
   } catch {
-    return { event: null, groups: [] }
+    return null
   }
 }
 
 export function Presenter() {
-  const [data, setData] = useState<Cached>(loadCache())
+  const [cache] = useState(loadCache) // mostra a última lista na hora, sem tela de carregando
+  const [data, setData] = useState<Cached>(cache ?? { event: null, groups: [] })
+  const lastJson = useRef(cache ? JSON.stringify(cache) : '')
   const [loaded, setLoaded] = useState(false)
   const [online, setOnline] = useState(true)
   const [pendingTicks, setPendingTicks] = useState<Tick[]>(ticks.items())
@@ -33,16 +37,17 @@ export function Presenter() {
             sendTick: async (t) => {
               await api(`/api/groups/${t.groupId}/presented`, { method: 'PUT', body: { presented: t.presented } })
             },
-            fetchList: async () => {
-              const { event } = await api<{ event: EventInfo | null }>('/api/events/current')
-              const groups = event ? (await api<{ groups: GroupItem[] }>(`/api/list?eventId=${event.id}`)).groups : []
-              return { event, groups }
-            },
+            // uma chamada só traz o evento aberto e a lista
+            fetchList: () => api<Cached>('/api/list'),
           })
-          localStorage.setItem(CACHE, JSON.stringify(next))
-          // lista e pendências mudam juntas, para a caixinha não piscar
-          setData(next)
-          setPendingTicks(pending)
+          // lista e pendências mudam juntas, para a caixinha não piscar; sem mudança real, nada é redesenhado
+          const json = JSON.stringify(next)
+          if (json !== lastJson.current) {
+            lastJson.current = json
+            localStorage.setItem(CACHE, json)
+            setData(next)
+          }
+          setPendingTicks((prev) => (JSON.stringify(prev) === JSON.stringify(pending) ? prev : pending))
           setOnline(true)
         } catch (e) {
           if (e instanceof TypeError) setOnline(false)
@@ -87,11 +92,25 @@ export function Presenter() {
     ch.groups.push(g)
   }
 
-  if (!loaded && data.event === null && data.groups.length === 0) return <p className="empty">Carregando...</p>
-  if (data.event === null) return <p className="empty">Nenhum evento aberto.</p>
+  // Sem lista guardada, mostra um esqueleto até a primeira resposta (nada de "Nenhum evento" piscando antes da hora).
+  if (!cache && !loaded)
+    return (
+      <>
+        <OfflinePill online={online} />
+        <Skeleton rows={3} />
+      </>
+    )
+  if (data.event === null)
+    return (
+      <>
+        <OfflinePill online={online} text="Sem conexão: última lista" />
+        <p className="empty">Nenhum evento aberto.</p>
+      </>
+    )
 
   return (
     <>
+      <OfflinePill online={online} text="Sem conexão: mostrando a última lista" />
       <h1>{data.event.name}</h1>
       <p className="sub" aria-live="polite">
         {formatDate(data.event.event_date)} · {done} de {total} grupo(s) apresentados
@@ -106,11 +125,6 @@ export function Presenter() {
       >
         <i style={{ width: total ? `${(done / total) * 100}%` : '0%' }} />
       </div>
-      {!online && (
-        <div className="banner" role="status">
-          Sem conexão. Mostrando a última lista carregada.
-        </div>
-      )}
       {groups.length === 0 && <p className="empty">Nenhum visitante ainda.</p>}
       {blocks.map((b) => (
         <section className="card city-block" key={b.city} aria-label={`Cidade ${b.city}`}>

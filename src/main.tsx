@@ -6,7 +6,8 @@ import { applyTheme } from './theme'
 import { App } from './App'
 
 applyTheme()
-registerSW({ immediate: true })
+// A versão nova só entra na próxima vez que o app for aberto: nunca recarrega a tela no meio do culto.
+registerSW({ immediate: true, onNeedRefresh() {} })
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

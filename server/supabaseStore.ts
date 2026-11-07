@@ -1,15 +1,39 @@
-import { createClient } from '@supabase/supabase-js'
-import { OpenEventExists, type EventRow, type GroupRow, type NewPerson, type PersonRow, type Store } from './store'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import {
+  OpenEventExists,
+  UniqueViolation,
+  type EventRow,
+  type GroupRow,
+  type NewPerson,
+  type PersonRow,
+  type Store,
+} from './store'
 
 const UNIQUE_VIOLATION = '23505'
+const PAGE_SIZE = 1000 // o PostgREST devolve no máximo 1000 linhas por pedido
 
-function must<T>(res: { data: T; error: { code?: string; message: string } | null }): T {
+type Res<T> = { data: T; error: { code?: string; message: string } | null }
+
+function must<T>(res: Res<T>): T {
   if (res.error) throw new Error(res.error.message)
   return res.data
 }
 
-export function supabaseStore(url: string, serviceKey: string): Store {
-  const db = createClient(url, serviceKey, { auth: { persistSession: false } })
+/** Lê todas as páginas de uma consulta, para listas com mais de 1000 linhas não virem cortadas. */
+async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<Res<T[] | null>>): Promise<T[]> {
+  const all: T[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const rows = must(await page(from, from + PAGE_SIZE - 1)) ?? []
+    all.push(...rows)
+    if (rows.length < PAGE_SIZE) return all
+  }
+}
+
+const PEOPLE_CONFLICT = 'event_id,name_key,city_key,church_key'
+
+/** `client` existe só para os testes poderem trocar o cliente do Supabase por um falso. */
+export function supabaseStore(url: string, serviceKey: string, client?: SupabaseClient): Store {
+  const db = client ?? createClient(url, serviceKey, { auth: { persistSession: false } })
 
   return {
     async getPin(role) {
@@ -46,7 +70,9 @@ export function supabaseStore(url: string, serviceKey: string): Store {
       ) as GroupRow | null
     },
     async insertGroup(g) {
-      return must(await db.from('groups').insert(g).select('*').single()) as GroupRow
+      const res = await db.from('groups').insert(g).select('*').single()
+      if (res.error?.code === UNIQUE_VIOLATION) throw new UniqueViolation()
+      return must(res) as GroupRow
     },
     async getGroup(id) {
       return must(await db.from('groups').select('*').eq('id', id).maybeSingle()) as GroupRow | null
@@ -58,12 +84,21 @@ export function supabaseStore(url: string, serviceKey: string): Store {
       must(await db.from('groups').delete().eq('id', id))
     },
     async listGroups(eventId) {
-      return must(await db.from('groups').select('*').eq('event_id', eventId).order('created_at')) as GroupRow[]
+      return fetchAll<GroupRow>((from, to) =>
+        db.from('groups').select('*').eq('event_id', eventId).order('created_at').order('id').range(from, to),
+      )
     },
     async insertPerson(p: NewPerson) {
       const res = await db.from('people').insert(p).select('*').single()
       if (res.error?.code === UNIQUE_VIOLATION) return null
       return must(res) as PersonRow
+    },
+    async insertPeople(list: NewPerson[]) {
+      if (list.length === 0) return []
+      // uma única ida ao banco; quem já existe é ignorado e não volta no resultado
+      return must(
+        await db.from('people').upsert(list, { onConflict: PEOPLE_CONFLICT, ignoreDuplicates: true }).select('*'),
+      ) as PersonRow[]
     },
     async findPersonByKey(eventId, nameKey, cityKey, churchKey) {
       return must(
@@ -78,10 +113,12 @@ export function supabaseStore(url: string, serviceKey: string): Store {
       ) as PersonRow | null
     },
     async listPeople(eventId) {
-      return must(await db.from('people').select('*').eq('event_id', eventId).order('created_at')) as PersonRow[]
+      return fetchAll<PersonRow>((from, to) =>
+        db.from('people').select('*').eq('event_id', eventId).order('created_at').order('id').range(from, to),
+      )
     },
     async listPeopleByGroup(groupId) {
-      return must(await db.from('people').select('*').eq('group_id', groupId).order('created_at')) as PersonRow[]
+      return must(await db.from('people').select('*').eq('group_id', groupId).order('created_at').order('id')) as PersonRow[]
     },
     async deletePerson(id) {
       must(await db.from('people').delete().eq('id', id))
@@ -94,9 +131,6 @@ export function supabaseStore(url: string, serviceKey: string): Store {
       if (res.error?.code === UNIQUE_VIOLATION) return false
       must(res)
       return true
-    },
-    async setPresented(personId, presented) {
-      must(await db.from('people').update({ presented }).eq('id', personId))
     },
   }
 }

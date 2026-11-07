@@ -45,16 +45,47 @@ describe('fila offline', () => {
     await q.flush(send)
     expect(q.count()).toBe(1)
   })
-  it('erro permanente descarta o item e segue para o próximo', async () => {
+  it('item recusado vai para a lista de recusados, com o motivo, e não trava os outros', async () => {
     q.enqueue({ id: 'a', v: 1 })
     q.enqueue({ id: 'b', v: 2 })
     const sent: string[] = []
     await q.flush(async (i) => {
-      if (i.id === 'a') throw new PermanentError('inválido')
+      if (i.id === 'a') throw new PermanentError('Evento não encontrado')
       sent.push(i.id)
     })
     expect(sent).toEqual(['b'])
     expect(q.count()).toBe(0)
+    expect(q.failed()).toEqual([{ item: { id: 'a', v: 1 }, error: 'Evento não encontrado' }])
+  })
+  it('um item recusado nunca é reenviado sozinho', async () => {
+    q.enqueue({ id: 'a', v: 1 })
+    const send = vi.fn(async () => {
+      throw new PermanentError('recusado')
+    })
+    await q.flush(send)
+    await q.flush(send)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+  it('retry devolve o recusado à fila (podendo corrigir o item) e discard remove de vez', async () => {
+    q.enqueue({ id: 'a', v: 1 })
+    q.enqueue({ id: 'b', v: 2 })
+    await q.flush(async () => {
+      throw new PermanentError('recusado')
+    })
+    expect(q.failed().map((f) => f.item.id)).toEqual(['a', 'b'])
+    q.retry('a', (i) => ({ ...i, v: 99 }))
+    expect(q.items()).toEqual([{ id: 'a', v: 99 }])
+    expect(q.failed().map((f) => f.item.id)).toEqual(['b'])
+    q.discard('b')
+    expect(q.failed()).toEqual([])
+  })
+  it('os recusados sobrevivem a recarregar a página', async () => {
+    q.enqueue({ id: 'a', v: 1 })
+    await q.flush(async () => {
+      throw new PermanentError('recusado')
+    })
+    const again = createQueue<Item>('teste', (i) => i.id)
+    expect(again.failed()).toHaveLength(1)
   })
   it('enqueue do mesmo id substitui o anterior (última escrita vale)', async () => {
     q.enqueue({ id: 'a', v: 1 })

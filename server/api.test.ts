@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createApp } from './app'
 import { memoryStore } from './memoryStore'
 import { hashPin } from './auth'
+import { findPinConflict } from './pins'
 import type { Store } from './store'
 
 const SECRET = 'segredo-de-teste'
@@ -57,13 +58,16 @@ describe('login', () => {
 })
 
 describe('erros internos', () => {
-  it('falha ao falar com o banco devolve 500 em JSON com mensagem legível', async () => {
+  it('falha ao falar com o banco devolve 500 em JSON sem expor detalhes internos', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     store.getPin = async () => {
       throw new Error('Invalid API key')
     }
     const r = await login('111')
     expect(r.status).toBe(500)
-    expect(await r.json()).toEqual({ error: 'Erro no servidor', detail: 'Invalid API key' })
+    expect(await r.json()).toEqual({ error: 'Erro no servidor' })
+    expect(log).toHaveBeenCalled() // o motivo fica no log do servidor
+    log.mockRestore()
   })
 })
 
@@ -211,8 +215,7 @@ describe('visitantes', () => {
     const pres = await tokenFor('presenter')
     await submit(a, eid, ['João', 'Maria'])
     let list = await getList(eid, pres)
-    const joao = list.groups[0].people.find((p) => p.name === 'João')!
-    await call('PUT', `/api/people/${joao.id}/presented`, pres, { presented: true })
+    await call('PUT', `/api/groups/${list.groups[0].id}/presented`, pres, { presented: true })
     const r = await call('PUT', `/api/groups/${list.groups[0].id}`, a, {
       city: 'Ipueiras',
       church: 'ADTC',
@@ -248,16 +251,17 @@ describe('visitantes', () => {
 })
 
 describe('revisão final', () => {
-  it('reenvio depois de falha no meio do envio completa as pessoas que faltaram', async () => {
+  it('reenvio depois de falha ao gravar as pessoas completa o envio, sem cartão duplicado', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const eid = await openEvent()
     const t = await tokenFor('reception')
     const pres = await tokenFor('presenter')
-    const real = store.insertPerson.bind(store)
+    const real = store.insertPeople.bind(store)
     let calls = 0
-    store.insertPerson = async (p) => {
+    store.insertPeople = async (list) => {
       calls++
-      if (calls === 2) throw new Error('queda')
-      return real(p)
+      if (calls === 1) throw new Error('queda')
+      return real(list)
     }
     const body = { clientId: uid(), eventId: eid, city: 'Ipueiras', church: 'ADTC', names: ['Maria', 'Carlos'] }
     expect((await call('POST', '/api/groups', t, body)).status).toBe(500)
@@ -267,24 +271,7 @@ describe('revisão final', () => {
     const list = await getList(eid, pres)
     expect(list.groups).toHaveLength(1)
     expect(list.groups[0].people.map((p) => p.name).sort()).toEqual(['Carlos', 'Maria'])
-  })
-  it('grupo que ficou vazio por falha é preenchido no reenvio, sem cartão duplicado', async () => {
-    const eid = await openEvent()
-    const t = await tokenFor('reception')
-    const pres = await tokenFor('presenter')
-    const real = store.insertPerson.bind(store)
-    let calls = 0
-    store.insertPerson = async (p) => {
-      calls++
-      if (calls === 1) throw new Error('queda')
-      return real(p)
-    }
-    const body = { clientId: uid(), eventId: eid, city: 'Ipueiras', church: 'ADTC', names: ['Maria'] }
-    await call('POST', '/api/groups', t, body)
-    await call('POST', '/api/groups', t, body)
-    const list = await getList(eid, pres)
-    expect(list.groups).toHaveLength(1)
-    expect(list.groups[0].people).toHaveLength(1)
+    log.mockRestore()
   })
   it('mesmo nome duas vezes no mesmo envio conta uma vez', async () => {
     const eid = await openEvent()
@@ -311,7 +298,7 @@ describe('revisão final', () => {
 
   const put = (t: string, gid: string, people: { id?: string; name: string }[], over: Record<string, unknown> = {}) =>
     call('PUT', `/api/groups/${gid}`, t, { city: 'Ipueiras', church: 'ADTC', observation: null, people, ...over })
-  const mark = async (pres: string, id: string) => call('PUT', `/api/people/${id}/presented`, pres, { presented: true })
+  const mark = async (pres: string, groupId: string) => call('PUT', `/api/groups/${groupId}/presented`, pres, { presented: true })
 
   it('corrigir o nome de quem já foi apresentado mantém a marcação', async () => {
     const eid = await openEvent()
@@ -319,7 +306,7 @@ describe('revisão final', () => {
     const pres = await tokenFor('presenter')
     await submit(a, eid, ['Jose'])
     const g = (await getMine(eid, a)).groups[0]
-    await mark(pres, g.people[0].id)
+    await mark(pres, g.id)
     expect((await put(a, g.id, [{ id: g.people[0].id, name: 'José Carlos' }])).status).toBe(200)
     const p = (await getList(eid, pres)).groups[0].people
     expect(p).toHaveLength(1)
@@ -332,7 +319,7 @@ describe('revisão final', () => {
     const pres = await tokenFor('presenter')
     await submit(a, eid, ['João'], { city: 'Ipueras' })
     const g = (await getMine(eid, a)).groups[0]
-    await mark(pres, g.people[0].id)
+    await mark(pres, g.id)
     expect((await put(a, g.id, [{ id: g.people[0].id, name: 'João' }], { city: 'Ipueiras' })).status).toBe(200)
     const list = await getList(eid, pres)
     expect(list.groups[0].people[0].presented).toBe(true)
@@ -346,18 +333,18 @@ describe('revisão final', () => {
     await put(a, g.id, [{ id: g.people[0].id, name: 'João Silva' }])
     expect((await getList(eid, pres)).groups[0].people[0].name).toBe('João Silva')
   })
-  it('remover alguém do meio não passa a marcação para outra pessoa', async () => {
+  it('remover alguém do meio mantém a marcação de quem ficou', async () => {
     const eid = await openEvent()
     const a = await tokenFor('reception')
     const pres = await tokenFor('presenter')
     await submit(a, eid, ['Ana', 'Bia', 'Caio'])
     const g = (await getMine(eid, a)).groups[0]
-    const [ana, bia, caio] = g.people
-    await mark(pres, bia.id)
+    const [ana, , caio] = g.people
+    await mark(pres, g.id)
     await put(a, g.id, [{ id: ana.id, name: 'Ana' }, { id: caio.id, name: 'Caio' }])
     const p = (await getList(eid, pres)).groups[0].people
     expect(p.map((x) => x.name)).toEqual(['Ana', 'Caio'])
-    expect(p.every((x) => !x.presented)).toBe(true)
+    expect(p.every((x) => x.presented)).toBe(true)
   })
   it('edição que dá 409 não apaga nem altera nada', async () => {
     const eid = await openEvent()
@@ -435,19 +422,6 @@ describe('apresentador', () => {
     const list = await getList(eid, pres)
     expect(list.groups.map((g) => g.people[0].name)).toEqual(['Primeiro', 'Segundo'])
   })
-  it('marcar duas vezes mantém true; desmarcar volta a false', async () => {
-    const eid = await openEvent()
-    const a = await tokenFor('reception')
-    const pres = await tokenFor('presenter')
-    await submit(a, eid, ['João'])
-    const first = async () => (await getList(eid, pres)).groups[0].people[0]
-    const p = await first()
-    await call('PUT', `/api/people/${p.id}/presented`, pres, { presented: true })
-    await call('PUT', `/api/people/${p.id}/presented`, pres, { presented: true })
-    expect((await first()).presented).toBe(true)
-    await call('PUT', `/api/people/${p.id}/presented`, pres, { presented: false })
-    expect((await first()).presented).toBe(false)
-  })
   it('marcar o grupo marca todas as pessoas; desmarcar desmarca todas', async () => {
     const eid = await openEvent()
     const a = await tokenFor('reception')
@@ -478,11 +452,9 @@ describe('apresentador', () => {
     await submit(a, eid, ['Ana', 'Bia', 'Caio'])
     const gid = (await getList(eid, pres)).groups[0].id
     const group = vi.spyOn(store, 'setGroupPresented')
-    const person = vi.spyOn(store, 'setPresented')
     await call('PUT', `/api/groups/${gid}/presented`, pres, { presented: true })
     expect(group).toHaveBeenCalledTimes(1)
     expect(group).toHaveBeenCalledWith(gid, true)
-    expect(person).not.toHaveBeenCalled()
   })
   it('recepção não marca grupo como apresentado (403)', async () => {
     const eid = await openEvent()
@@ -491,13 +463,84 @@ describe('apresentador', () => {
     const gid = (await getMine(eid, a)).groups[0].id
     expect((await call('PUT', `/api/groups/${gid}/presented`, a, { presented: true })).status).toBe(403)
   })
-  it('recepção não marca apresentado (403)', async () => {
-    const a = await tokenFor('reception')
-    expect((await call('PUT', '/api/people/qualquer/presented', a, { presented: true })).status).toBe(403)
+  it('a rota de marcar por pessoa não existe mais (404)', async () => {
+    const pres = await tokenFor('presenter')
+    expect((await call('PUT', '/api/people/qualquer/presented', pres, { presented: true })).status).toBe(404)
   })
   it('recepção não lê a lista do apresentador (403)', async () => {
     const eid = await openEvent()
     const a = await tokenFor('reception')
     expect((await call('GET', `/api/list?eventId=${eid}`, a)).status).toBe(403)
+  })
+})
+
+describe('correções da revisão (segunda rodada)', () => {
+  it('código repetido em dois acessos não deixa entrar em nenhum (409)', async () => {
+    await setPin('presenter', '111111') // igual ao do admin
+    const r = await login('111111')
+    expect(r.status).toBe(409)
+    expect(await r.json()).toEqual({ error: 'Esse código está repetido em mais de um acesso. Fale com o administrador.' })
+  })
+  it('findPinConflict acha o outro acesso que já usa o código', async () => {
+    expect(await findPinConflict(store, 'presenter', '222222')).toBe('reception')
+    expect(await findPinConflict(store, 'reception', '222222')).toBeNull()
+    expect(await findPinConflict(store, 'presenter', '999')).toBeNull()
+  })
+  it('sessão válida não consulta o PIN de novo dentro de 10 s e consulta depois disso', async () => {
+    let clock = 1_000_000
+    app = createApp(store, SECRET, { now: () => clock })
+    const t = await tokenFor('reception')
+    const spy = vi.spyOn(store, 'getPin')
+    for (let i = 0; i < 3; i++) await call('GET', '/api/events/current', t)
+    expect(spy).toHaveBeenCalledTimes(1)
+    clock += 11_000
+    await call('GET', '/api/events/current', t)
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
+  it('GET /api/list sem eventId devolve o evento aberto e seus grupos numa chamada só', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    await submit(a, eid, ['Ana'])
+    const r = (await (await call('GET', '/api/list', pres)).json()) as { event: { id: string } | null; groups: unknown[] }
+    expect(r.event?.id).toBe(eid)
+    expect(r.groups).toHaveLength(1)
+  })
+  it('GET /api/groups/mine sem eventId usa o evento aberto e só os grupos deste aparelho', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception', 'dev-A')
+    const b = await tokenFor('reception', 'dev-B')
+    await submit(a, eid, ['Ana'])
+    await submit(b, eid, ['Bia'])
+    const r = (await (await call('GET', '/api/groups/mine', a)).json()) as { event: { id: string } | null; groups: { people: { name: string }[] }[] }
+    expect(r.event?.id).toBe(eid)
+    expect(r.groups.map((g) => g.people[0].name)).toEqual(['Ana'])
+  })
+  it('sem evento aberto as listagens devolvem event null e grupos vazios', async () => {
+    expect(await (await call('GET', '/api/list', await tokenFor('presenter'))).json()).toEqual({ event: null, groups: [] })
+    expect(await (await call('GET', '/api/groups/mine', await tokenFor('reception'))).json()).toEqual({ event: null, groups: [] })
+  })
+  it('o envio grava todas as pessoas em uma única chamada ao banco', async () => {
+    const eid = await openEvent()
+    const t = await tokenFor('reception')
+    const batch = vi.spyOn(store, 'insertPeople')
+    const single = vi.spyOn(store, 'insertPerson')
+    const names = Array.from({ length: 15 }, (_, i) => `Pessoa ${i + 1}`)
+    const r = (await (await submit(t, eid, names)).json()) as { added: string[] }
+    expect(r.added).toHaveLength(15)
+    expect(batch).toHaveBeenCalledTimes(1)
+    expect(single).not.toHaveBeenCalled()
+  })
+  it('dois envios simultâneos com o mesmo clientId resultam em um único grupo', async () => {
+    const eid = await openEvent()
+    const t = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    const body = { clientId: uid(), eventId: eid, city: 'Ipueiras', church: 'ADTC', names: ['João', 'Maria'] }
+    const [r1, r2] = await Promise.all([call('POST', '/api/groups', t, body), call('POST', '/api/groups', t, body)])
+    expect(r1.status).toBe(200)
+    expect(r2.status).toBe(200)
+    const list = await getList(eid, pres)
+    expect(list.groups).toHaveLength(1)
+    expect(list.groups[0].people.map((p) => p.name).sort()).toEqual(['João', 'Maria'])
   })
 })

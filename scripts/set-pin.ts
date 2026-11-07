@@ -1,7 +1,8 @@
-// Uso: npx tsx scripts/set-pin.ts <admin|reception|presenter> <PIN de 6 dígitos>
+// Uso: npx tsx scripts/set-pin.ts <admin|reception|presenter> <PIN de 3 a 8 dígitos>
 // Lê SUPABASE_URL e SUPABASE_SERVICE_KEY do ambiente (ou do arquivo .dev.vars).
 import { readFileSync, existsSync } from 'node:fs'
-import { hashPin } from '../server/auth'
+import { hashPin, type Role } from '../server/auth'
+import { findPinConflict } from '../server/pins'
 import { supabaseStore } from '../server/supabaseStore'
 
 if (existsSync('.dev.vars')) {
@@ -22,6 +23,12 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   process.exit(1)
 }
 
+const store = supabaseStore(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+const conflict = await findPinConflict(store, role as Role, pin)
+if (conflict) {
+  console.error(`Esse código já é usado pelo acesso "${conflict}". Escolha outro, senão quem digitar entraria no acesso errado.`)
+  process.exit(1)
+}
 const salt = crypto.randomUUID()
-await supabaseStore(SUPABASE_URL, SUPABASE_SERVICE_KEY).setPin(role, await hashPin(pin, salt), salt)
+await store.setPin(role, await hashPin(pin, salt), salt)
 console.log(`PIN de ${role} definido.`)

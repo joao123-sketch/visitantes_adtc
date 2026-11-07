@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, type EventInfo, type GroupItem } from '../api'
 import { createQueue, PermanentError } from '../queue'
 import { formatDate } from '../format'
+import { OfflinePill, Skeleton, useToast } from '../ui'
 
 type PendingGroup = {
   clientId: string
@@ -12,31 +13,52 @@ type PendingGroup = {
   observation: string
 }
 type Row = { id?: string; name: string }
+type Cached = { event: EventInfo | null; groups: GroupItem[] }
 
 const queue = createQueue<PendingGroup>('pending-groups', (g) => g.clientId)
-
-type Notice = { kind: 'ok' | 'warn' | 'err'; text: string } | null
+const CACHE = 'reception-cache'
 const emptyRows = (): Row[] => [{ name: '' }]
 
+const loadCache = (): Cached | null => {
+  try {
+    const v = JSON.parse(localStorage.getItem(CACHE) ?? '') as Cached
+    return v && Array.isArray(v.groups) ? v : null
+  } catch {
+    return null
+  }
+}
+
+/** Mantém a referência antiga quando nada mudou, para o React não redesenhar à toa. */
+const keep = <T,>(prev: T, next: T): T => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next)
+
 export function Reception() {
-  const [event, setEvent] = useState<EventInfo | null | undefined>(undefined)
-  const [mine, setMine] = useState<GroupItem[]>([])
+  const [cache] = useState(loadCache) // mostra o último estado na hora, sem tela de carregando
+  const [event, setEvent] = useState<EventInfo | null | undefined>(cache ? cache.event : undefined)
+  const [mine, setMine] = useState<GroupItem[]>(cache?.groups ?? [])
   const [pending, setPending] = useState<PendingGroup[]>(queue.items())
+  const [failed, setFailed] = useState(queue.failed())
   const [city, setCity] = useState('')
   const [church, setChurch] = useState('')
   const [rows, setRows] = useState<Row[]>(emptyRows())
   const [observation, setObservation] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [notice, setNotice] = useState<Notice>(null)
   const [online, setOnline] = useState(true)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const { toast, show } = useToast(96) // acima da barra fixa de envio
+  const lastJson = useRef(cache ? JSON.stringify(cache) : '')
 
+  // Uma chamada só traz o evento aberto e os envios deste aparelho; a tela só muda se algo mudou de verdade.
   const refresh = useCallback(async () => {
     try {
-      const { event: ev } = await api<{ event: EventInfo | null }>('/api/events/current')
-      setEvent(ev)
+      const r = await api<Cached>('/api/groups/mine')
+      const json = JSON.stringify(r)
+      if (json !== lastJson.current) {
+        lastJson.current = json
+        localStorage.setItem(CACHE, json)
+        setEvent(r.event)
+        setMine(r.groups)
+      }
       setOnline(true)
-      if (ev) setMine((await api<{ groups: GroupItem[] }>(`/api/groups/mine?eventId=${ev.id}`)).groups)
     } catch (e) {
       if (e instanceof TypeError) setOnline(false)
     }
@@ -46,21 +68,21 @@ export function Reception() {
     await queue.flush(async (g) => {
       try {
         const r = await api<{ added: string[]; duplicates: string[] }>('/api/groups', { method: 'POST', body: g })
-        if (r.added.length === 0) setNotice({ kind: 'warn', text: `Já estava na lista: ${r.duplicates.join(', ')}` })
-        else if (r.duplicates.length)
-          setNotice({ kind: 'ok', text: `Enviado. Já estavam na lista: ${r.duplicates.join(', ')}` })
-        else setNotice({ kind: 'ok', text: 'Enviado com sucesso.' })
+        if (r.added.length === 0) show('warn', `Já estava na lista: ${r.duplicates.join(', ')}`)
+        else if (r.duplicates.length) show('ok', `Enviado. Já estavam na lista: ${r.duplicates.join(', ')}`)
+        else show('ok', 'Enviado com sucesso.')
       } catch (e) {
         if (e instanceof ApiError && (e.status === 400 || e.status === 404)) {
-          setNotice({ kind: 'err', text: `Um envio foi recusado e descartado: ${e.message}` })
-          throw new PermanentError(e.message)
+          show('err', 'Um envio foi recusado. Veja em "Não enviados".')
+          throw new PermanentError(e.message) // vai para "Não enviados", sem perder o que foi digitado
         }
         throw e
       }
     })
-    setPending(queue.items())
+    setPending((prev) => keep(prev, queue.items()))
+    setFailed((prev) => keep(prev, queue.failed()))
     await refresh()
-  }, [refresh])
+  }, [refresh, show])
 
   useEffect(() => {
     void sync()
@@ -86,7 +108,7 @@ export function Reception() {
   async function submit() {
     if (!event) return
     if (!city.trim() || !church.trim() || filled.length === 0) {
-      setNotice({ kind: 'err', text: 'Preencha cidade, igreja e pelo menos um nome.' })
+      show('err', 'Preencha cidade, igreja e pelo menos um nome.')
       return
     }
     if (editingId) {
@@ -95,14 +117,11 @@ export function Reception() {
           method: 'PUT',
           body: { city, church, people: filled.map((r) => ({ id: r.id, name: r.name.trim() })), observation: observation || null },
         })
-        setNotice({ kind: 'ok', text: 'Alteração salva.' })
+        show('ok', 'Alteração salva.')
         resetForm()
         await refresh()
       } catch (e) {
-        setNotice({
-          kind: 'err',
-          text: e instanceof TypeError ? 'Sem conexão. Para editar é preciso internet.' : (e as Error).message,
-        })
+        show('err', e instanceof TypeError ? 'Sem conexão. Para editar é preciso internet.' : (e as Error).message)
       }
       return
     }
@@ -116,9 +135,8 @@ export function Reception() {
     })
     setPending(queue.items())
     resetForm()
-    setNotice({ kind: 'warn', text: 'Guardado no celular. Enviando...' })
-    await sync()
-    if (queue.count() > 0) setNotice({ kind: 'warn', text: 'Sem conexão: ficou pendente e será enviado sozinho.' })
+    await sync() // o aviso final ("Enviado" ou "Sem conexão") aparece uma vez só, sem avisos intermediários
+    if (queue.count() > 0) show('warn', 'Sem conexão: ficou pendente e será enviado sozinho.')
   }
 
   function startEdit(g: GroupItem) {
@@ -136,41 +154,50 @@ export function Reception() {
       await api(`/api/groups/${g.id}`, { method: 'DELETE' })
       await refresh()
     } catch (e) {
-      setNotice({
-        kind: 'err',
-        text: e instanceof TypeError ? 'Sem conexão. Para apagar é preciso internet.' : (e as Error).message,
-      })
+      show('err', e instanceof TypeError ? 'Sem conexão. Para apagar é preciso internet.' : (e as Error).message)
     }
   }
 
-  if (event === undefined) return <p className="empty">Carregando...</p>
+  function retryFailed(id: string) {
+    if (!event) {
+      show('err', 'Não há evento aberto para reenviar.')
+      return
+    }
+    queue.retry(id, (g) => ({ ...g, eventId: event.id })) // reenvia para o evento que está aberto agora
+    setFailed(queue.failed())
+    setPending(queue.items())
+    void sync()
+  }
+
+  function discardFailed(id: string) {
+    queue.discard(id)
+    setFailed(queue.failed())
+  }
+
+  if (event === undefined)
+    return (
+      <>
+        <OfflinePill online={online} />
+        <Skeleton rows={3} />
+      </>
+    )
   if (event === null)
     return (
       <>
-        {!online && (
-          <div className="banner" role="status">
-            Sem conexão.
-          </div>
-        )}
+        <OfflinePill online={online} />
         <p className="empty">Nenhum evento aberto.</p>
+        {toast}
       </>
     )
 
   return (
     <>
+      <OfflinePill online={online} text="Sem conexão: o que você anotar fica guardado" />
       <h1>{event.name}</h1>
       <p className="sub">
         {formatDate(event.event_date)}
         {pending.length > 0 && <span className="tag">{pending.length} pendente(s)</span>}
       </p>
-      {!online && (
-        <div className="banner" role="status">
-          Sem conexão. O que você anotar fica guardado e é enviado quando a internet voltar.
-        </div>
-      )}
-      <div role="status" aria-live="polite">
-        {notice && <div className={`banner ${notice.kind === 'ok' ? 'ok' : notice.kind === 'err' ? 'err' : ''}`}>{notice.text}</div>}
-      </div>
 
       <form
         className="card"
@@ -217,6 +244,29 @@ export function Reception() {
           {editingId ? 'Salvar alteração' : 'Enviar'}
         </button>
       </form>
+
+      {failed.length > 0 && (
+        <>
+          <h2>Não enviados</h2>
+          {failed.map((f) => (
+            <div className="card" key={f.item.clientId}>
+              <div className="group-head">
+                {f.item.city} · {f.item.church} <span className="tag">recusado</span>
+              </div>
+              {f.item.names.join(', ')}
+              <div className="obs">{f.error}</div>
+              <div className="actions">
+                <button className="link" onClick={() => retryFailed(f.item.clientId)}>
+                  Tentar de novo
+                </button>
+                <button className="link danger" onClick={() => discardFailed(f.item.clientId)}>
+                  Descartar
+                </button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
 
       <h2>Enviados por mim</h2>
       {pending.length === 0 && mine.length === 0 && <p className="empty">Nada enviado ainda.</p>}
@@ -266,6 +316,7 @@ export function Reception() {
           {editingId ? 'Salvar alteração' : 'Enviar'}
         </button>
       </div>
+      {toast}
     </>
   )
 }

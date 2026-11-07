@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type EventInfo, type Role } from '../api'
 import { formatDate } from '../format'
+import { Skeleton, useToast } from '../ui'
 
 const ROLE_LABEL: Record<Role, string> = {
   admin: 'Administrador',
@@ -15,24 +16,27 @@ export function Admin() {
   const [pins, setPins] = useState<Record<Role, string>>({ admin: '', reception: '', presenter: '' })
   const [confirmClose, setConfirmClose] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
-  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const { toast, show } = useToast()
 
   const load = useCallback(async () => {
     try {
       setEvents((await api<{ events: EventInfo[] }>('/api/events')).events)
     } catch (e) {
-      setNotice({ ok: false, text: (e as Error).message })
+      show('err', (e as Error).message)
+    } finally {
+      setLoaded(true)
     }
-  }, [])
+  }, [show])
   useEffect(() => void load(), [load])
 
   async function run(fn: () => Promise<unknown>, okText: string) {
     try {
       await fn()
-      setNotice({ ok: true, text: okText })
+      show('ok', okText)
       await load()
     } catch (e) {
-      setNotice({ ok: false, text: e instanceof TypeError ? 'Sem conexão.' : (e as Error).message })
+      show('err', e instanceof TypeError ? 'Sem conexão.' : (e as Error).message)
     }
   }
 
@@ -59,10 +63,18 @@ export function Admin() {
     </div>
   )
 
+  // Até a primeira resposta, esqueleto no lugar do formulário (senão aparecia "Abrir evento" e logo trocava).
+  if (!loaded)
+    return (
+      <>
+        <h1>Administração</h1>
+        <Skeleton rows={2} header={false} />
+      </>
+    )
+
   return (
     <>
       <h1>Administração</h1>
-      {notice && <div role="status" aria-live="polite"><div className={`banner ${notice.ok ? 'ok' : 'err'}`}>{notice.text}</div></div>}
 
       <div className="card">
         <div className="card-title">Evento aberto</div>
@@ -179,6 +191,7 @@ export function Admin() {
           </div>
         ))}
       </div>
+      {toast}
     </>
   )
 }

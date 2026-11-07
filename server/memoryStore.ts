@@ -1,4 +1,12 @@
-import { OpenEventExists, type EventRow, type GroupRow, type NewPerson, type PersonRow, type Store } from './store'
+import {
+  OpenEventExists,
+  UniqueViolation,
+  type EventRow,
+  type GroupRow,
+  type NewPerson,
+  type PersonRow,
+  type Store,
+} from './store'
 
 /** Store em memória, usado nos testes. Imita as restrições únicas do banco. */
 export function memoryStore(): Store {
@@ -11,6 +19,14 @@ export function memoryStore(): Store {
   const now = () => new Date(Date.now() + n).toISOString()
   const keyOf = (p: { event_id: string; name_key: string; city_key: string; church_key: string }) =>
     `${p.event_id}|${p.name_key}|${p.city_key}|${p.church_key}`
+
+  // Cada operação roda inteira, sem pausas no meio, como uma instrução atômica do banco.
+  const insertOne = (p: NewPerson): PersonRow | null => {
+    if (people.some((x) => keyOf(x) === keyOf(p))) return null
+    const row: PersonRow = { ...p, id: id(), presented: false, created_at: now() }
+    people.push(row)
+    return row
+  }
 
   return {
     async getPin(role) {
@@ -49,6 +65,7 @@ export function memoryStore(): Store {
       return groups.find((g) => g.event_id === eventId && g.client_id === clientId) ?? null
     },
     async insertGroup(g) {
+      if (groups.some((x) => x.event_id === g.event_id && x.client_id === g.client_id)) throw new UniqueViolation()
       const row = { ...g, id: id(), created_at: now() }
       groups.push(row)
       return row
@@ -68,10 +85,15 @@ export function memoryStore(): Store {
       return groups.filter((g) => g.event_id === eventId)
     },
     async insertPerson(p: NewPerson) {
-      if (people.some((x) => keyOf(x) === keyOf(p))) return null
-      const row: PersonRow = { ...p, id: id(), presented: false, created_at: now() }
-      people.push(row)
-      return row
+      return insertOne(p)
+    },
+    async insertPeople(list: NewPerson[]) {
+      const inserted: PersonRow[] = []
+      for (const p of list) {
+        const row = insertOne(p)
+        if (row) inserted.push(row)
+      }
+      return inserted
     },
     async findPersonByKey(eventId, name_key, city_key, church_key) {
       return people.find((x) => keyOf(x) === keyOf({ event_id: eventId, name_key, city_key, church_key })) ?? null
@@ -95,10 +117,6 @@ export function memoryStore(): Store {
       if (people.some((x) => x.id !== pid && keyOf(x) === keyOf({ event_id: p.event_id, ...f }))) return false
       Object.assign(p, f)
       return true
-    },
-    async setPresented(pid, presented) {
-      const p = people.find((x) => x.id === pid)
-      if (p) p.presented = presented
     },
   }
 }

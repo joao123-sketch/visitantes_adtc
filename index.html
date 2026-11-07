@@ -9,6 +9,18 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <meta name="color-scheme" content="light dark" />
+    <style>
+      html { background: #fdf6ec; }
+      @media (prefers-color-scheme: dark) { html:not([data-theme='light']) { background: #17110c; } }
+      html[data-theme='dark'] { background: #17110c; }
+    </style>
+    <script>
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    </script>
     <title>Visitantes ADTC</title>
   </head>
   <body>

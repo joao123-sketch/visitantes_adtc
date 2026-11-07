@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // Simulação aleatória do apresentador: toques rápidos em vários grupos com rede lenta e variável.
-// Usa o código real (fila, execução serial e ciclo de sincronização) com um servidor falso.
-import { describe, it, expect, beforeEach } from 'vitest'
+// Usa o código real (fila, execução serial e ciclo de sincronização) com um servidor falso e
+// TIMERS FALSOS: o tempo anda de 1 em 1 ms de forma determinística, então o teste é rápido e não depende do relógio da máquina.
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createQueue } from './queue'
 import { createSerialRunner } from './serialRunner'
 import { addTick, syncPresenter, type Tick, type Cached } from './presenterSync'
@@ -67,8 +68,12 @@ function makeWorld(n: number, rnd: () => number, maxLatency: number, key: string
   return { server, displayed, tap, poll }
 }
 
-describe('apresentador: toques aleatórios com rede lenta', () => {
-  beforeEach(() => localStorage.clear())
+describe('apresentador: toques aleatórios com rede lenta (tempo simulado)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.useFakeTimers()
+  })
+  afterEach(() => vi.useRealTimers())
 
   for (let seed = 1; seed <= 12; seed++) {
     it(`sequência ${seed}: sem piscar, sem perder toque, servidor igual à tela`, async () => {
@@ -77,33 +82,35 @@ describe('apresentador: toques aleatórios com rede lenta', () => {
       const w = makeWorld(n, rnd, 12, `sim-${seed}`)
       const intended: (boolean | undefined)[] = Array(n).fill(undefined)
       const violations: string[] = []
-      let sampling = true
-      const t0 = Date.now()
-      const sampler = (async () => {
-        while (sampling) {
-          for (let i = 0; i < n; i++) {
-            const want = intended[i]
-            if (want !== undefined && w.displayed(i) !== want) violations.push(`g${i} mostrou ${w.displayed(i)} em vez de ${want} aos ${Date.now() - t0}ms`)
-          }
-          await sleep(1)
-        }
-      })()
       const interval = setInterval(() => void w.poll(), 30)
 
+      // programa 14 toques: alguns quase simultâneos (mesmo milissegundo), outros espaçados
+      const taps: { at: number; i: number }[] = []
+      let at = 0
       for (let k = 0; k < 14; k++) {
-        const i = Math.floor(rnd() * n)
-        const next = !w.displayed(i)
-        w.tap(i)
-        intended[i] = next
-        await sleep(rnd() < 0.4 ? 0 : rnd() * 25) // toques quase simultâneos e espaçados
+        taps.push({ at, i: Math.floor(rnd() * n) })
+        at += rnd() < 0.4 ? 0 : Math.floor(rnd() * 25)
       }
-      await sleep(600) // deixa tudo sincronizar
+      const end = at + 600 // depois dos toques, tempo de sobra para tudo sincronizar
+      let next = 0
+
+      for (let clock = 0; clock <= end; clock++) {
+        while (next < taps.length && taps[next].at <= clock) {
+          const { i } = taps[next++]
+          const want = !w.displayed(i)
+          w.tap(i)
+          intended[i] = want
+        }
+        for (let i = 0; i < n; i++) {
+          const want = intended[i]
+          if (want !== undefined && w.displayed(i) !== want) violations.push(`g${i} mostrou ${w.displayed(i)} em vez de ${want} aos ${clock}ms`)
+        }
+        await vi.advanceTimersByTimeAsync(1)
+      }
       clearInterval(interval)
-      sampling = false
-      await sampler
 
       expect(violations).toEqual([])
       for (let i = 0; i < n; i++) if (intended[i] !== undefined) expect(w.server[i]).toBe(intended[i])
-    }, 30000)
+    })
   }
 })
