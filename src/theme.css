@@ -77,6 +77,7 @@
 }
 
 * { box-sizing: border-box; }
+html, body, label, button, input { touch-action: manipulation; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; color: var(--text); background: linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%) fixed;

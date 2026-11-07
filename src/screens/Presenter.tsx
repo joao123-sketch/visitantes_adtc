@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type EventInfo, type GroupItem } from '../api'
 import { createQueue } from '../queue'
 import { createSerialRunner } from '../serialRunner'
-import { syncPresenter, type Cached, type Tick } from '../presenterSync'
+import { addTick, syncPresenter, type Cached, type Tick } from '../presenterSync'
 import { formatDate } from '../format'
 import { normalizeKey } from '../../server/normalize'
 
@@ -60,8 +60,10 @@ export function Presenter() {
   }, [poll])
 
   function toggle(groupId: string, presented: boolean) {
-    ticks.enqueue({ groupId, presented })
-    setPendingTicks(ticks.items())
+    const tick = { groupId, presented }
+    ticks.enqueue(tick)
+    // soma ao que já está na tela (não troca pela fila, que já perdeu o que foi enviado e ainda não voltou na lista)
+    setPendingTicks((prev) => addTick(prev, tick))
     void poll()
   }
 
