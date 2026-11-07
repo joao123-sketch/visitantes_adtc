@@ -80,6 +80,9 @@ export function memoryStore(): Store {
       const i = people.findIndex((x) => x.id === pid)
       if (i >= 0) people.splice(i, 1)
     },
+    async setGroupPresented(gid, presented) {
+      for (const p of people) if (p.group_id === gid) p.presented = presented
+    },
     async updatePerson(pid, f) {
       const p = people.find((x) => x.id === pid)
       if (!p) return false

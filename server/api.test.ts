@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createApp } from './app'
 import { memoryStore } from './memoryStore'
 import { hashPin } from './auth'
@@ -420,6 +420,19 @@ describe('apresentador', () => {
     const after = (await getList(eid, pres)).groups
     expect(after[0].people[0].presented).toBe(true)
     expect(after[1].people[0].presented).toBe(false)
+  })
+  it('marcar o grupo faz uma única atualização no banco, não pessoa por pessoa', async () => {
+    const eid = await openEvent()
+    const a = await tokenFor('reception')
+    const pres = await tokenFor('presenter')
+    await submit(a, eid, ['Ana', 'Bia', 'Caio'])
+    const gid = (await getList(eid, pres)).groups[0].id
+    const group = vi.spyOn(store, 'setGroupPresented')
+    const person = vi.spyOn(store, 'setPresented')
+    await call('PUT', `/api/groups/${gid}/presented`, pres, { presented: true })
+    expect(group).toHaveBeenCalledTimes(1)
+    expect(group).toHaveBeenCalledWith(gid, true)
+    expect(person).not.toHaveBeenCalled()
   })
   it('recepção não marca grupo como apresentado (403)', async () => {
     const eid = await openEvent()

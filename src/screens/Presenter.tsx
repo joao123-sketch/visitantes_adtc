@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, type EventInfo, type GroupItem } from '../api'
 import { createQueue } from '../queue'
+import { createSerialRunner } from '../serialRunner'
+import { syncPresenter, type Cached, type Tick } from '../presenterSync'
 import { formatDate } from '../format'
 import { normalizeKey } from '../../server/normalize'
 
-type Tick = { groupId: string; presented: boolean }
 const ticks = createQueue<Tick>('pending-group-ticks', (t) => t.groupId)
 const CACHE = 'last-list'
 
-type Cached = { event: EventInfo | null; groups: GroupItem[] }
 const loadCache = (): Cached => {
   try {
     return JSON.parse(localStorage.getItem(CACHE) ?? '') as Cached
@@ -23,24 +23,35 @@ export function Presenter() {
   const [online, setOnline] = useState(true)
   const [pendingTicks, setPendingTicks] = useState<Tick[]>(ticks.items())
 
-  const poll = useCallback(async () => {
-    try {
-      await ticks.flush(async (t) => {
-        await api(`/api/groups/${t.groupId}/presented`, { method: 'PUT', body: { presented: t.presented } })
-      })
-      setPendingTicks(ticks.items())
-      const { event } = await api<{ event: EventInfo | null }>('/api/events/current')
-      const groups = event ? (await api<{ groups: GroupItem[] }>(`/api/list?eventId=${event.id}`)).groups : []
-      const next = { event, groups }
-      localStorage.setItem(CACHE, JSON.stringify(next))
-      setData(next)
-      setOnline(true)
-    } catch (e) {
-      if (e instanceof TypeError) setOnline(false)
-    } finally {
-      setLoaded(true)
-    }
-  }, [])
+  // Nunca roda dois ciclos ao mesmo tempo: assim uma resposta velha não sobrescreve a nova.
+  const poll = useMemo(
+    () =>
+      createSerialRunner(async () => {
+        try {
+          const { data: next, pending } = await syncPresenter({
+            ticks,
+            sendTick: async (t) => {
+              await api(`/api/groups/${t.groupId}/presented`, { method: 'PUT', body: { presented: t.presented } })
+            },
+            fetchList: async () => {
+              const { event } = await api<{ event: EventInfo | null }>('/api/events/current')
+              const groups = event ? (await api<{ groups: GroupItem[] }>(`/api/list?eventId=${event.id}`)).groups : []
+              return { event, groups }
+            },
+          })
+          localStorage.setItem(CACHE, JSON.stringify(next))
+          // lista e pendências mudam juntas, para a caixinha não piscar
+          setData(next)
+          setPendingTicks(pending)
+          setOnline(true)
+        } catch (e) {
+          if (e instanceof TypeError) setOnline(false)
+        } finally {
+          setLoaded(true)
+        }
+      }),
+    [],
+  )
 
   useEffect(() => {
     void poll()

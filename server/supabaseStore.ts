@@ -83,6 +83,9 @@ export function supabaseStore(url: string, serviceKey: string): Store {
     async deletePerson(id) {
       must(await db.from('people').delete().eq('id', id))
     },
+    async setGroupPresented(groupId, presented) {
+      must(await db.from('people').update({ presented }).eq('group_id', groupId))
+    },
     async updatePerson(id, fields) {
       const res = await db.from('people').update(fields).eq('id', id)
       if (res.error?.code === UNIQUE_VIOLATION) return false

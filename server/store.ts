@@ -51,4 +51,6 @@ export interface Store {
   /** Atualiza nome e chaves mantendo a marcação de apresentado. Devolve false se a nova chave já existir no evento. */
   updatePerson(id: string, fields: { name: string; name_key: string; city_key: string; church_key: string }): Promise<boolean>
   setPresented(personId: string, presented: boolean): Promise<void>
+  /** Marca ou desmarca todas as pessoas do grupo de uma vez só (uma única atualização). */
+  setGroupPresented(groupId: string, presented: boolean): Promise<void>
 }

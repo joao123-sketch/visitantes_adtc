@@ -308,7 +308,7 @@ export function createApp(store: Store, secret: string) {
   app.put('/api/groups/:id/presented', only('presenter', 'admin'), async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const presented = body.presented === true
-    for (const p of await store.listPeopleByGroup(c.req.param('id') ?? '')) await store.setPresented(p.id, presented)
+    await store.setGroupPresented(c.req.param('id') ?? '', presented)
     return c.json({ ok: true })
   })
 

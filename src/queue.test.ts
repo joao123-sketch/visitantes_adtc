@@ -62,6 +62,34 @@ describe('fila offline', () => {
     expect(q.count()).toBe(1)
     expect(q.items()[0].v).toBe(2)
   })
+  it('toque novo durante o envio não é perdido e é enviado logo depois', async () => {
+    q.enqueue({ id: 'a', v: 1 })
+    const sent: number[] = []
+    let first = true
+    await q.flush(async (i) => {
+      sent.push(i.v)
+      if (first) {
+        first = false
+        q.enqueue({ id: 'a', v: 2 })
+      }
+    })
+    expect(sent).toEqual([1, 2])
+    expect(q.count()).toBe(0)
+  })
+  it('flush chamado durante outro flush também envia o item novo', async () => {
+    q.enqueue({ id: 'a', v: 1 })
+    const sent: number[] = []
+    const slow = async (i: Item) => {
+      sent.push(i.v)
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    const first = q.flush(slow)
+    q.enqueue({ id: 'b', v: 2 })
+    await q.flush(slow)
+    await first
+    expect(sent).toEqual([1, 2])
+    expect(q.count()).toBe(0)
+  })
   it('a fila sobrevive a recarregar a página', () => {
     q.enqueue({ id: 'a', v: 1 })
     const again = createQueue<Item>('teste', (i) => i.id)
