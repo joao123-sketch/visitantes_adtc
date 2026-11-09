@@ -4,7 +4,7 @@ import { createQueue, PermanentError } from '../queue'
 import { formatDate } from '../format'
 import { Chips, OfflinePill, Skeleton, showsOther, useToast } from '../ui'
 import { useDept } from '../useDept'
-import { deptKey, fullName, PRESET_CHURCHES, PRESET_CITIES, PRESET_TITLES, splitRole } from '../presets'
+import { deptKey, fullName, isFriendName, PRESET_CHURCHES, PRESET_CITIES, PRESET_TITLES, splitRole } from '../presets'
 
 type PendingGroup = {
   clientId: string
@@ -109,10 +109,13 @@ export function Reception() {
   }
 
   const filled = rows.filter((r) => r.name.trim())
+  const friendOnly = filled.some((r) => isFriendName(fullName(r.role, r.name)))
 
   async function submit() {
     if (!event) return
-    if (!city.trim() || !church.trim() || filled.length === 0) {
+    // Amigo do Evangelho não tem igreja: com um deles na lista, a igreja é opcional.
+    const friend = friendOnly
+    if (!city.trim() || (!church.trim() && !friend) || filled.length === 0) {
       show('err', 'Preencha cidade, igreja e pelo menos um nome.')
       return
     }
@@ -284,7 +287,7 @@ export function Reception() {
         {showsOther(cityOther, city, PRESET_CITIES) && (
           <input aria-labelledby="cidade-label" className="other-input" value={city} autoFocus autoComplete="off" onChange={(e) => setCity(e.target.value)} />
         )}
-        <label htmlFor="igreja">Igreja</label>
+        <label htmlFor="igreja">Igreja{friendOnly ? ' (opcional)' : ''}</label>
         <input id="igreja" value={church} onChange={(e) => setChurch(e.target.value)} autoComplete="off" />
         <Chips options={PRESET_CHURCHES} value={church} onPick={setChurch} label="Igrejas mais comuns" />
         </div>
@@ -306,7 +309,7 @@ export function Reception() {
           {failed.map((f) => (
             <div className="card" key={f.item.clientId}>
               <div className="group-head">
-                {f.item.city} · {f.item.church} <span className="tag">recusado</span>
+                {[f.item.city, f.item.church].filter(Boolean).join(' · ')} <span className="tag">recusado</span>
               </div>
               {f.item.names.join(', ')}
               <div className="obs">{f.error}</div>
@@ -328,7 +331,7 @@ export function Reception() {
       {pending.map((g) => (
         <div className="card" key={g.clientId}>
           <div className="group-head">
-            {g.city} · {g.church} <span className="tag">pendente</span>
+            {[g.city, g.church].filter(Boolean).join(' · ')} <span className="tag">pendente</span>
           </div>
           {g.names.join(', ')}
         </div>
@@ -336,7 +339,7 @@ export function Reception() {
       {[...mine].reverse().map((g) => (
         <div className="card" key={g.id}>
           <div className="group-head">
-            {g.city} · {g.church}
+            {[g.city, g.church].filter(Boolean).join(' · ')}
           </div>
           {g.people.map((p) => p.name).join(', ')}
           {g.observation && <div className="obs">{g.observation}</div>}

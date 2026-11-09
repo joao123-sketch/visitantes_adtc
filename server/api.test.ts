@@ -490,3 +490,22 @@ describe('correções da revisão (segunda rodada)', () => {
     expect(list.groups[0].people.map((p) => p.name).sort()).toEqual(['João', 'Maria'])
   })
 })
+
+describe('Amigo do Evangelho não precisa de igreja', () => {
+  it('sem igreja só passa se houver um Amigo do Evangelho na lista', async () => {
+    const eid = await openEvent()
+    const t = await tokenFor('reception')
+    expect((await submit(t, eid, ['Pastor João'], { church: '' })).status).toBe(400)
+    expect((await submit(t, eid, ['Amigo do Evangelho Maria'], { church: '' })).status).toBe(200)
+    expect((await submit(t, eid, ['Pastor Ana', 'Amigo do Evangelho Lia'], { church: '' })).status).toBe(200)
+  })
+  it('ao editar, também vale a mesma regra', async () => {
+    const eid = await openEvent()
+    const t = await tokenFor('reception')
+    await submit(t, eid, ['Amigo do Evangelho Maria'], { church: '' })
+    const gid = (await getMine(eid, t)).groups[0].id
+    const put = (people: { name: string }[]) => call('PUT', `/api/groups/${gid}`, t, { city: 'Ipu', church: '', people })
+    expect((await put([{ name: 'Amigo do Evangelho Maria' }])).status).toBe(200)
+    expect((await put([{ name: 'Diácono Pedro' }])).status).toBe(400)
+  })
+})

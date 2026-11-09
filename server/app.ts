@@ -13,6 +13,9 @@ const cleanNames = (names: unknown): string[] =>
     ? names.map((n) => String(n ?? '').trim().replace(/\s+/g, ' ')).filter((n) => n.length > 0)
     : []
 
+/** "Amigo do Evangelho" não pertence a uma igreja: com ao menos um na lista, a igreja pode ficar em branco. */
+const isFriend = (name: string) => /^amigo(\(a\))? do evangelho\b/i.test(name.trim())
+
 const text = (v: unknown) => String(v ?? '').trim().replace(/\s+/g, ' ')
 
 function mergeObservation(current: string | null, extra: string | null | undefined): string | null {
@@ -142,8 +145,9 @@ export function createApp(store: Store, secret: string) {
     const city = text(body.city)
     const church = text(body.church)
     const names = cleanNames(body.names)
-    if (!eventId || !clientId || !city || !church) return c.json({ error: 'Preencha cidade e igreja' }, 400)
+    if (!eventId || !clientId || !city) return c.json({ error: 'Preencha cidade e igreja' }, 400)
     if (names.length === 0) return c.json({ error: 'Informe pelo menos um nome' }, 400)
+    if (!church && !names.some(isFriend)) return c.json({ error: 'Preencha cidade e igreja' }, 400)
     if (!(await store.getEvent(eventId))) return c.json({ error: 'Evento não encontrado' }, 404)
 
     // Mesmo nome duas vezes no mesmo envio conta uma vez.
@@ -217,7 +221,7 @@ export function createApp(store: Store, secret: string) {
     const city = text(body.city)
     const church = text(body.church)
     const names = cleanNames(body.names)
-    if (!city || !church) return c.json({ error: 'Preencha cidade e igreja' }, 400)
+    if (!city) return c.json({ error: 'Preencha cidade e igreja' }, 400)
 
     const cityKey = normalizeKey(city)
     const churchKey = normalizeKey(church)
@@ -242,6 +246,7 @@ export function createApp(store: Store, secret: string) {
       entries.push({ id, name: e.name })
     }
     if (entries.length === 0) return c.json({ error: 'Informe pelo menos um nome' }, 400)
+    if (!church && !entries.some((e) => isFriend(e.name))) return c.json({ error: 'Preencha cidade e igreja' }, 400)
 
     const toRemove = current.filter((p) => !used.has(p.id))
     const updates = entries

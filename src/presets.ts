@@ -31,3 +31,6 @@ export function deptKey(name: string | null | undefined): string {
   const norm = last.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   return (name ?? '').includes(' · ') ? (STYLED[norm] ?? '') : ''
 }
+
+/** Quem é "Amigo do Evangelho" não tem igreja; com um deles no envio, a igreja é opcional (o servidor confere a mesma regra). */
+export const isFriendName = (full: string) => /^amigo(\(a\))? do evangelho\b/i.test(full.trim())

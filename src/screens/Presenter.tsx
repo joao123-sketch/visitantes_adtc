@@ -134,7 +134,7 @@ export function Presenter() {
           <h2 className="city-title">De {b.city},</h2>
           {b.churches.map((ch) => (
             <div className="church-block" key={ch.church} role="group" aria-label={`Igreja ${ch.church}`}>
-              <h3 className="church-title">da {ch.church}</h3>
+              {ch.church && <h3 className="church-title">da {ch.church}</h3>}
               {ch.groups.map((g) => (
                 <label key={g.id} className={`group-card ${g.presented ? 'done' : ''}`}>
                   <input type="checkbox" checked={g.presented} onChange={(e) => toggle(g.id, e.target.checked)} />
