@@ -1,16 +1,12 @@
 import { Hono } from 'hono'
 import type { Context, Next } from 'hono'
-import { hashPin, signToken, verifyToken, type Role, type TokenPayload } from './auth'
+import { signToken, verifyToken, type Role, type TokenPayload } from './auth'
 import { normalizeKey } from './normalize'
-import { findPinConflict, rolesMatchingPin, ROLES } from './pins'
 import { OpenEventExists, UniqueViolation, type PersonRow, type Store } from './store'
 
-type Env = { Variables: { user: TokenPayload } }
+const ROLES: Role[] = ['admin', 'reception', 'presenter']
 
-/** O fingerprint do PIN de cada papel é guardado por alguns segundos para não consultar o banco a cada requisição. */
-const PIN_CACHE_MS = 10_000
-export type PinCache = Map<Role, { ph: string | null; at: number }>
-export type AppOptions = { now?: () => number; pinCache?: PinCache }
+type Env = { Variables: { user: TokenPayload } }
 
 const cleanNames = (names: unknown): string[] =>
   Array.isArray(names)
@@ -26,10 +22,8 @@ function mergeObservation(current: string | null, extra: string | null | undefin
   return current.toLowerCase().includes(add.toLowerCase()) ? current : `${current} · ${add}`
 }
 
-export function createApp(store: Store, secret: string, opts: AppOptions = {}) {
+export function createApp(store: Store, secret: string) {
   const app = new Hono<Env>()
-  const now = opts.now ?? Date.now
-  const pinCache: PinCache = opts.pinCache ?? new Map()
 
   // Falhas internas viram JSON genérico; o motivo real vai só para o log do servidor.
   app.onError((err, c) => {
@@ -37,22 +31,11 @@ export function createApp(store: Store, secret: string, opts: AppOptions = {}) {
     return c.json({ error: 'Erro no servidor' }, 500)
   })
 
-  const currentPh = async (role: Role): Promise<string | null> => {
-    const hit = pinCache.get(role)
-    if (hit && now() - hit.at < PIN_CACHE_MS) return hit.ph
-    const row = await store.getPin(role)
-    const ph = row ? row.pin_hash.slice(0, 16) : null
-    pinCache.set(role, { ph, at: now() })
-    return ph
-  }
-
   const auth = async (c: Context<Env>, next: Next) => {
     const header = c.req.header('authorization') ?? ''
     const token = header.startsWith('Bearer ') ? header.slice(7) : ''
     const user = token ? await verifyToken(token, secret) : null
     if (!user) return c.json({ error: 'Sessão inválida' }, 401)
-    const ph = await currentPh(user.role)
-    if (!ph || ph !== user.ph) return c.json({ error: 'Sessão inválida' }, 401)
     c.set('user', user)
     await next()
   }
@@ -63,20 +46,15 @@ export function createApp(store: Store, secret: string, opts: AppOptions = {}) {
       await next()
     }
 
+  // Sem código de acesso: a pessoa escolhe Administrador, Recepção ou Apresentação na tela de entrada.
   app.post('/api/login', async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
-    const pin = String(body.pin ?? '')
+    const role = body.role as Role
     const deviceId = String(body.deviceId ?? '')
     if (!deviceId) return c.json({ error: 'Aparelho não identificado' }, 400)
-    const matches = await rolesMatchingPin(store, pin)
-    if (matches.length > 1) {
-      return c.json({ error: 'Esse código está repetido em mais de um acesso. Fale com o administrador.' }, 409)
-    }
-    if (matches.length === 0) return c.json({ error: 'PIN incorreto' }, 401)
-    const { role, pin_hash } = matches[0]
+    if (!ROLES.includes(role)) return c.json({ error: 'Acesso inválido' }, 400)
     const name = body.name ? text(body.name) : undefined
-    const token = await signToken({ role, deviceId, name, ph: pin_hash.slice(0, 16) }, secret)
-    return c.json({ token, role })
+    return c.json({ token: await signToken({ role, deviceId, name }, secret), role })
   })
 
   app.use('/api/*', async (c, next) => (c.req.path === '/api/login' ? next() : auth(c, next)))
@@ -119,19 +97,6 @@ export function createApp(store: Store, secret: string, opts: AppOptions = {}) {
       if (e instanceof OpenEventExists) return c.json({ error: 'Já existe um evento aberto' }, 409)
       throw e
     }
-  })
-
-  app.put('/api/pins/:role', only('admin'), async (c) => {
-    const role = c.req.param('role') as Role
-    const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
-    const pin = String(body.pin ?? '')
-    if (!ROLES.includes(role)) return c.json({ error: 'Papel inválido' }, 400)
-    if (!/^\d{3,8}$/.test(pin)) return c.json({ error: 'O código precisa ter de 3 a 8 números' }, 400)
-    if (await findPinConflict(store, role, pin)) return c.json({ error: 'Esse código já é usado por outro acesso' }, 409)
-    const salt = crypto.randomUUID()
-    await store.setPin(role, await hashPin(pin, salt), salt)
-    pinCache.delete(role) // as sessões antigas deste acesso deixam de valer já
-    return c.json({ ok: true })
   })
 
   // ---------- listagens (recepção e apresentador) ----------

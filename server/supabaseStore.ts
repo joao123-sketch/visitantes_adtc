@@ -36,12 +36,6 @@ export function supabaseStore(url: string, serviceKey: string, client?: Supabase
   const db = client ?? createClient(url, serviceKey, { auth: { persistSession: false } })
 
   return {
-    async getPin(role) {
-      return must(await db.from('access_pins').select('pin_hash, salt').eq('role', role).maybeSingle())
-    },
-    async setPin(role, pin_hash, salt) {
-      must(await db.from('access_pins').upsert({ role, pin_hash, salt }))
-    },
     async getOpenEvent() {
       return must(await db.from('events').select('*').eq('status', 'open').maybeSingle()) as EventRow | null
     },

@@ -1,19 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type EventInfo, type Role } from '../api'
+import { api, type EventInfo } from '../api'
 import { formatDate } from '../format'
+import { DEPARTMENTS, deptKey, eventName } from '../presets'
+import { useDept } from '../useDept'
+import { isoDate, nextOccurrence, WEEKLY_SERVICES } from '../schedule'
 import { Skeleton, useToast } from '../ui'
-
-const ROLE_LABEL: Record<Role, string> = {
-  admin: 'Administrador',
-  reception: 'Recepção',
-  presenter: 'Apresentador',
-}
 
 export function Admin() {
   const [events, setEvents] = useState<EventInfo[]>([])
   const [name, setName] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [pins, setPins] = useState<Record<Role, string>>({ admin: '', reception: '', presenter: '' })
+  const [dept, setDept] = useState('')
+  const [date, setDate] = useState(isoDate(new Date()))
   const [confirmClose, setConfirmClose] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -41,6 +38,7 @@ export function Admin() {
   }
 
   const open = events.find((e) => e.status === 'open')
+  useDept(deptKey(open ? open.name : eventName(name, dept))) // mostra já o estilo do departamento escolhido
 
   // Confirmação dentro do app (a janela nativa do navegador pode ser bloqueada).
   const deleteBox = (ev: EventInfo) => (
@@ -114,23 +112,63 @@ export function Admin() {
           </>
         ) : (
           <>
-            <p className="sub">Nenhum evento aberto.</p>
+            <p className="sub">Nenhum evento aberto. Escolha um culto da semana ou crie outro evento.</p>
+            <div className="agenda" role="group" aria-label="Cultos da semana">
+              {WEEKLY_SERVICES.map((sv) => {
+                const when = nextOccurrence(sv.weekday)
+                const picked = name === sv.name && date === when
+                const d = new Date(`${when}T12:00:00`)
+                const wd = d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '').toUpperCase()
+                const dm = `${String(d.getDate()).padStart(2, '0')}/${d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '').toUpperCase()}`
+                return (
+                  <button
+                    key={sv.id}
+                    type="button"
+                    className={`agenda-item${picked ? ' on' : ''}`}
+                    aria-pressed={picked}
+                    onClick={() => {
+                      setName(sv.name)
+                      setDate(when)
+                    }}
+                  >
+                    <span className="agenda-date">
+                      {wd}
+                      <b>{dm}</b>
+                    </span>
+                    <span className="agenda-body">{sv.name}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="open-form">
             <label htmlFor="ev-nome">Nome do evento</label>
             <input id="ev-nome" value={name} onChange={(e) => setName(e.target.value)} />
+            <span className="label" id="ev-dep">
+              Departamento
+            </span>
+            <div className="chips" role="group" aria-labelledby="ev-dep">
+              {DEPARTMENTS.map((d) => (
+                <button key={d} type="button" className={`chip${dept === d ? ' on' : ''}`} aria-pressed={dept === d} onClick={() => setDept(dept === d ? '' : d)}>
+                  {d}
+                </button>
+              ))}
+            </div>
             <label htmlFor="ev-data">Data</label>
             <input id="ev-data" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             <button
-              className="btn"
+              className="btn open-btn"
               disabled={!name.trim()}
               onClick={() =>
                 run(async () => {
-                  await api('/api/events', { method: 'POST', body: { name, eventDate: date } })
+                  await api('/api/events', { method: 'POST', body: { name: eventName(name, dept), eventDate: date } })
                   setName('')
+                  setDept('')
                 }, 'Evento aberto.')
               }
             >
               Abrir evento
             </button>
+            </div>
           </>
         )}
       </div>
@@ -141,11 +179,11 @@ export function Admin() {
         {events
           .filter((e) => e.status === 'closed')
           .map((e) => (
-            <div key={e.id} style={{ marginTop: 10 }}>
-              <div className="row" style={{ marginBottom: 0 }}>
-                <span style={{ flex: 1 }}>
-                  {e.name} · {formatDate(e.event_date)}
-                </span>
+            <div key={e.id} className="past-item">
+              <div className="past-name">
+                {e.name} · {formatDate(e.event_date)}
+              </div>
+              <div className="past-actions">
                 {!open && (
                   <button className="btn secondary small" onClick={() => run(() => api(`/api/events/${e.id}/reopen`, { method: 'POST' }), 'Evento reaberto.')}>
                     Reabrir
@@ -162,35 +200,6 @@ export function Admin() {
           ))}
       </div>
 
-      <div className="card">
-        <div className="card-title">Códigos de acesso</div>
-        {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
-          <div key={r}>
-            <label htmlFor={`pin-${r}`}>{ROLE_LABEL[r]}</label>
-            <div className="row">
-              <input
-                id={`pin-${r}`}
-                inputMode="numeric"
-                maxLength={8}
-                value={pins[r]}
-                onChange={(e) => setPins({ ...pins, [r]: e.target.value.replace(/\D/g, '') })}
-              />
-              <button
-                className="btn small"
-                disabled={pins[r].length < 3}
-                onClick={() =>
-                  run(async () => {
-                    await api(`/api/pins/${r}`, { method: 'PUT', body: { pin: pins[r] } })
-                    setPins({ ...pins, [r]: '' })
-                  }, `Código de ${ROLE_LABEL[r]} alterado.`)
-                }
-              >
-                Trocar
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
       {toast}
     </>
   )

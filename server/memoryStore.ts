@@ -10,7 +10,6 @@ import {
 
 /** Store em memória, usado nos testes. Imita as restrições únicas do banco. */
 export function memoryStore(): Store {
-  const pins = new Map<string, { pin_hash: string; salt: string }>()
   const events: EventRow[] = []
   const groups: GroupRow[] = []
   const people: PersonRow[] = []
@@ -29,12 +28,6 @@ export function memoryStore(): Store {
   }
 
   return {
-    async getPin(role) {
-      return pins.get(role) ?? null
-    },
-    async setPin(role, pin_hash, salt) {
-      pins.set(role, { pin_hash, salt })
-    },
     async getOpenEvent() {
       return events.find((e) => e.status === 'open') ?? null
     },

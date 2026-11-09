@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, type EventInfo, type GroupItem } from '../api'
 import { createQueue, PermanentError } from '../queue'
 import { formatDate } from '../format'
-import { OfflinePill, Skeleton, useToast } from '../ui'
+import { Chips, OfflinePill, Skeleton, showsOther, useToast } from '../ui'
+import { useDept } from '../useDept'
+import { deptKey, fullName, PRESET_CHURCHES, PRESET_CITIES, PRESET_TITLES, splitRole } from '../presets'
 
 type PendingGroup = {
   clientId: string
@@ -12,12 +14,12 @@ type PendingGroup = {
   names: string[]
   observation: string
 }
-type Row = { id?: string; name: string }
+type Row = { id?: string; role: string; name: string; other?: boolean }
 type Cached = { event: EventInfo | null; groups: GroupItem[] }
 
 const queue = createQueue<PendingGroup>('pending-groups', (g) => g.clientId)
 const CACHE = 'reception-cache'
-const emptyRows = (): Row[] => [{ name: '' }]
+const emptyRows = (): Row[] => [{ role: '', name: '' }]
 
 const loadCache = (): Cached | null => {
   try {
@@ -34,11 +36,13 @@ const keep = <T,>(prev: T, next: T): T => (JSON.stringify(prev) === JSON.stringi
 export function Reception() {
   const [cache] = useState(loadCache) // mostra o último estado na hora, sem tela de carregando
   const [event, setEvent] = useState<EventInfo | null | undefined>(cache ? cache.event : undefined)
+  useDept(deptKey(event?.name))
   const [mine, setMine] = useState<GroupItem[]>(cache?.groups ?? [])
   const [pending, setPending] = useState<PendingGroup[]>(queue.items())
   const [failed, setFailed] = useState(queue.failed())
   const [city, setCity] = useState('')
   const [church, setChurch] = useState('')
+  const [cityOther, setCityOther] = useState(false)
   const [rows, setRows] = useState<Row[]>(emptyRows())
   const [observation, setObservation] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -97,6 +101,7 @@ export function Reception() {
 
   const resetForm = () => {
     setCity('')
+    setCityOther(false)
     setChurch('')
     setRows(emptyRows())
     setObservation('')
@@ -115,7 +120,7 @@ export function Reception() {
       try {
         await api(`/api/groups/${editingId}`, {
           method: 'PUT',
-          body: { city, church, people: filled.map((r) => ({ id: r.id, name: r.name.trim() })), observation: observation || null },
+          body: { city, church, people: filled.map((r) => ({ id: r.id, name: fullName(r.role, r.name) })), observation: observation || null },
         })
         show('ok', 'Alteração salva.')
         resetForm()
@@ -130,7 +135,7 @@ export function Reception() {
       eventId: event.id,
       city,
       church,
-      names: filled.map((r) => r.name.trim()),
+      names: filled.map((r) => fullName(r.role, r.name)),
       observation,
     })
     setPending(queue.items())
@@ -142,8 +147,9 @@ export function Reception() {
   function startEdit(g: GroupItem) {
     setEditingId(g.id)
     setCity(g.city)
+    setCityOther(false)
     setChurch(g.church)
-    setRows(g.people.map((p) => ({ id: p.id, name: p.name })))
+    setRows(g.people.map((p) => ({ id: p.id, ...splitRole(p.name) })))
     setObservation(g.observation ?? '')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -207,32 +213,81 @@ export function Reception() {
         }}
       >
         <div className="card-title">{editingId ? 'Editar visitante' : 'Novo visitante'}</div>
-        <label htmlFor="cidade">Cidade</label>
-        <input id="cidade" value={city} onChange={(e) => setCity(e.target.value)} autoComplete="off" />
-        <label htmlFor="igreja">Igreja</label>
-        <input id="igreja" value={church} onChange={(e) => setChurch(e.target.value)} autoComplete="off" />
-        <span className="label" id="pessoas-label">
-          Pessoas
-        </span>
         {rows.map((r, i) => (
-          <div className="row" key={i}>
+          <section className="person-card" key={i} aria-label={`Pessoa ${i + 1}`}>
+            <div className="person-head">
+              <span>Pessoa {i + 1}</span>
+              {rows.length > 1 && (
+                <button type="button" className="link danger" aria-label={`Remover pessoa ${i + 1}`} onClick={() => setRows(rows.filter((_, j) => j !== i))}>
+                  Remover
+                </button>
+              )}
+            </div>
+            <label htmlFor={`nome-${i}`}>Nome</label>
             <input
-              aria-labelledby="pessoas-label"
-              aria-label={`Nome da pessoa ${i + 1}`}
+              id={`nome-${i}`}
               value={r.name}
               autoComplete="off"
               onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
             />
-            {rows.length > 1 && (
-              <button type="button" className="x" aria-label={`Remover pessoa ${i + 1}`} onClick={() => setRows(rows.filter((_, j) => j !== i))}>
-                ✕
-              </button>
+            <span className="label" id={`cargo-label-${i}`}>
+              Cargo
+            </span>
+            <Chips
+              options={PRESET_TITLES}
+              value={r.role}
+              onPick={(v) => setRows(rows.map((x, j) => (j === i ? { ...x, role: v, other: false } : x)))}
+              label={`Cargo da pessoa ${i + 1}`}
+              otherOn={showsOther(!!r.other, r.role, PRESET_TITLES)}
+              onOther={() =>
+                setRows(
+                  rows.map((x, j) =>
+                    j !== i ? x : showsOther(!!x.other, x.role, PRESET_TITLES) ? { ...x, role: '', other: false } : { ...x, role: '', other: true },
+                  ),
+                )
+              }
+            />
+            {showsOther(!!r.other, r.role, PRESET_TITLES) && (
+              <input
+                aria-labelledby={`cargo-label-${i}`}
+                className="other-input"
+                value={r.role}
+                autoFocus
+                autoComplete="off"
+                onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))}
+              />
             )}
-          </div>
+          </section>
         ))}
-        <button type="button" className="link" onClick={() => setRows([...rows, { name: '' }])}>
+        <button type="button" className="add-person" onClick={() => setRows([...rows, { role: '', name: '' }])}>
           ＋ Adicionar pessoa
         </button>
+        <div className="origin">
+        <span className="label" id="cidade-label">
+          Cidade
+        </span>
+        <Chips
+          options={PRESET_CITIES}
+          value={city}
+          onPick={(v) => {
+            setCity(v)
+            setCityOther(false)
+          }}
+          label="Cidades mais comuns"
+          otherOn={showsOther(cityOther, city, PRESET_CITIES)}
+          onOther={() => {
+            const open = showsOther(cityOther, city, PRESET_CITIES)
+            setCity('')
+            setCityOther(!open)
+          }}
+        />
+        {showsOther(cityOther, city, PRESET_CITIES) && (
+          <input aria-labelledby="cidade-label" className="other-input" value={city} autoFocus autoComplete="off" onChange={(e) => setCity(e.target.value)} />
+        )}
+        <label htmlFor="igreja">Igreja</label>
+        <input id="igreja" value={church} onChange={(e) => setChurch(e.target.value)} autoComplete="off" />
+        <Chips options={PRESET_CHURCHES} value={church} onPick={setChurch} label="Igrejas mais comuns" />
+        </div>
         <label htmlFor="obs">Observações (opcional)</label>
         <textarea id="obs" value={observation} onChange={(e) => setObservation(e.target.value)} />
         {editingId && (

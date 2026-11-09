@@ -31,17 +31,9 @@ npm test
 
 A configuração do Worker está em `wrangler.jsonc`; só as rotas `/api/*` passam pelo código em `worker/index.ts`.
 
-## Definir os PINs iniciais
+## Acesso
 
-Crie o arquivo `.dev.vars` (ignorado pelo git) com `SUPABASE_URL=...` e `SUPABASE_SERVICE_KEY=...`, e rode:
-
-```bash
-npx tsx scripts/set-pin.ts admin 111
-npx tsx scripts/set-pin.ts reception 222
-npx tsx scripts/set-pin.ts presenter 333
-```
-
-Depois, os PINs podem ser trocados na tela de administração.
+Não há código: a tela de entrada tem três caixas (Administrador, Recepção, Apresentação). A tabela `access_pins` do Supabase não é mais usada e pode ser apagada.
 
 ## Instalar no celular
 

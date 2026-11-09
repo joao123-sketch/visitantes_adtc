@@ -5,6 +5,8 @@ import { createSerialRunner } from '../serialRunner'
 import { addTick, syncPresenter, type Cached, type Tick } from '../presenterSync'
 import { formatDate } from '../format'
 import { OfflinePill, Skeleton } from '../ui'
+import { useDept } from '../useDept'
+import { deptKey } from '../presets'
 import { normalizeKey } from '../../server/normalize'
 
 const ticks = createQueue<Tick>('pending-group-ticks', (t) => t.groupId)
@@ -22,6 +24,7 @@ const loadCache = (): Cached | null => {
 export function Presenter() {
   const [cache] = useState(loadCache) // mostra a última lista na hora, sem tela de carregando
   const [data, setData] = useState<Cached>(cache ?? { event: null, groups: [] })
+  useDept(deptKey(data.event?.name))
   const lastJson = useRef(cache ? JSON.stringify(cache) : '')
   const [loaded, setLoaded] = useState(false)
   const [online, setOnline] = useState(true)

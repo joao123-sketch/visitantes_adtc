@@ -54,3 +54,43 @@ export function Skeleton({ rows = 3, header = true }: { rows?: number; header?: 
     </div>
   )
 }
+
+/** Botões de atalho: um toque preenche o campo (toque de novo para limpar). Com `onOther`, o último botão "Outro" abre o campo de texto. */
+export function Chips({
+  options,
+  value,
+  onPick,
+  label,
+  otherOn = false,
+  onOther,
+}: {
+  options: string[]
+  value: string
+  onPick: (v: string) => void
+  label: string
+  otherOn?: boolean
+  onOther?: () => void
+}) {
+  if (options.length === 0 && !onOther) return null
+  return (
+    <div className="chips" role="group" aria-label={label}>
+      {options.map((o) => {
+        const on = !otherOn && value.trim().toLowerCase() === o.toLowerCase()
+        return (
+          <button key={o} type="button" className={`chip${on ? ' on' : ''}`} aria-pressed={on} onClick={() => onPick(on ? '' : o)}>
+            {o}
+          </button>
+        )
+      })}
+      {onOther && (
+        <button type="button" className={`chip${otherOn ? ' on' : ''}`} aria-pressed={otherOn} aria-expanded={otherOn} onClick={onOther}>
+          Outro
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Campo de texto livre só aparece depois de "Outro" (ou quando já há um valor fora dos atalhos, como ao editar). */
+export const showsOther = (flag: boolean, value: string, options: string[]) =>
+  flag || (value.trim() !== '' && !options.some((o) => o.toLowerCase() === value.trim().toLowerCase()))

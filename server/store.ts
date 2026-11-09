@@ -29,8 +29,6 @@ export class OpenEventExists extends Error {}
 export class UniqueViolation extends Error {}
 
 export interface Store {
-  getPin(role: string): Promise<{ pin_hash: string; salt: string } | null>
-  setPin(role: string, pin_hash: string, salt: string): Promise<void>
   getOpenEvent(): Promise<EventRow | null>
   getEvent(id: string): Promise<EventRow | null>
   /** Eventos mais recentes primeiro (até 20). */

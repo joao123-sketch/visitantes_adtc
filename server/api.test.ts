@@ -1,27 +1,21 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createApp } from './app'
 import { memoryStore } from './memoryStore'
-import { hashPin } from './auth'
-import { findPinConflict } from './pins'
 import type { Store } from './store'
 
 const SECRET = 'segredo-de-teste'
 let store: Store
 let app: ReturnType<typeof createApp>
 
-async function setPin(role: string, pin: string) {
-  await store.setPin(role, await hashPin(pin, 'salt'), 'salt')
-}
-function login(pin: string, deviceId = 'dev-A', name = 'Carlos') {
+function login(role: string, deviceId = 'dev-A', name = 'Carlos') {
   return app.request('/api/login', {
     method: 'POST',
-    body: JSON.stringify({ pin, deviceId, name }),
+    body: JSON.stringify({ role, deviceId, name }),
     headers: { 'content-type': 'application/json' },
   })
 }
 async function tokenFor(role: 'admin' | 'reception' | 'presenter', deviceId = 'dev-A') {
-  const pins = { admin: '111111', reception: '222222', presenter: '333333' }
-  const r = await login(pins[role], deviceId)
+  const r = await login(role, deviceId)
   return ((await r.json()) as { token: string }).token
 }
 function call(method: string, path: string, token?: string, body?: unknown) {
@@ -35,21 +29,18 @@ function call(method: string, path: string, token?: string, body?: unknown) {
 beforeEach(async () => {
   store = memoryStore()
   app = createApp(store, SECRET)
-  await setPin('admin', '111111')
-  await setPin('reception', '222222')
-  await setPin('presenter', '333333')
 })
 
 describe('login', () => {
-  it('PIN correto devolve token e papel', async () => {
-    const r = await login('222222')
+  it('escolher o acesso devolve token e papel, sem código', async () => {
+    const r = await login('reception')
     expect(r.status).toBe(200)
     expect(await r.json()).toMatchObject({ role: 'reception' })
   })
-  it('PIN errado devolve 401 com mensagem', async () => {
-    const r = await login('000000')
-    expect(r.status).toBe(401)
-    expect(await r.json()).toEqual({ error: 'PIN incorreto' })
+  it('acesso inexistente devolve 400', async () => {
+    const r = await login('dono')
+    expect(r.status).toBe(400)
+    expect(await r.json()).toEqual({ error: 'Acesso inválido' })
   })
   it('rota protegida sem token ou com token inválido devolve 401', async () => {
     expect((await call('GET', '/api/events/current')).status).toBe(401)
@@ -60,10 +51,10 @@ describe('login', () => {
 describe('erros internos', () => {
   it('falha ao falar com o banco devolve 500 em JSON sem expor detalhes internos', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    store.getPin = async () => {
+    store.getOpenEvent = async () => {
       throw new Error('Invalid API key')
     }
-    const r = await login('111')
+    const r = await call('GET', '/api/events/current', await tokenFor('reception'))
     expect(r.status).toBe(500)
     expect(await r.json()).toEqual({ error: 'Erro no servidor' })
     expect(log).toHaveBeenCalled() // o motivo fica no log do servidor
@@ -100,13 +91,6 @@ describe('eventos', () => {
   it('current devolve null sem evento aberto', async () => {
     const t = await tokenFor('reception')
     expect(await (await call('GET', '/api/events/current', t)).json()).toEqual({ event: null })
-  })
-  it('PIN com menos de 3 dígitos ou com letras devolve 400; PIN de 3 dígitos é aceito', async () => {
-    const t = await tokenFor('admin')
-    expect((await call('PUT', '/api/pins/reception', t, { pin: '12' })).status).toBe(400)
-    expect((await call('PUT', '/api/pins/reception', t, { pin: 'abc' })).status).toBe(400)
-    expect((await call('PUT', '/api/pins/reception', t, { pin: '999' })).status).toBe(200)
-    expect((await login('999')).status).toBe(200)
   })
 })
 
@@ -278,22 +262,6 @@ describe('revisão final', () => {
     const t = await tokenFor('reception')
     const r = (await (await submit(t, eid, ['João', 'joao'])).json()) as { added: string[] }
     expect(r.added).toEqual(['João'])
-  })
-
-  it('PIN igual ao de outro acesso devolve 409', async () => {
-    const t = await tokenFor('admin')
-    const r = await call('PUT', '/api/pins/presenter', t, { pin: '222222' })
-    expect(r.status).toBe(409)
-    expect(await r.json()).toEqual({ error: 'Esse código já é usado por outro acesso' })
-  })
-
-  it('trocar o PIN derruba as sessões antigas daquele acesso', async () => {
-    const adm = await tokenFor('admin')
-    const rec = await tokenFor('reception')
-    expect((await call('GET', '/api/events/current', rec)).status).toBe(200)
-    await call('PUT', '/api/pins/reception', adm, { pin: '999999' })
-    expect((await call('GET', '/api/events/current', rec)).status).toBe(401)
-    expect((await call('GET', '/api/events/current', adm)).status).toBe(200)
   })
 
   const put = (t: string, gid: string, people: { id?: string; name: string }[], over: Record<string, unknown> = {}) =>
@@ -475,28 +443,6 @@ describe('apresentador', () => {
 })
 
 describe('correções da revisão (segunda rodada)', () => {
-  it('código repetido em dois acessos não deixa entrar em nenhum (409)', async () => {
-    await setPin('presenter', '111111') // igual ao do admin
-    const r = await login('111111')
-    expect(r.status).toBe(409)
-    expect(await r.json()).toEqual({ error: 'Esse código está repetido em mais de um acesso. Fale com o administrador.' })
-  })
-  it('findPinConflict acha o outro acesso que já usa o código', async () => {
-    expect(await findPinConflict(store, 'presenter', '222222')).toBe('reception')
-    expect(await findPinConflict(store, 'reception', '222222')).toBeNull()
-    expect(await findPinConflict(store, 'presenter', '999')).toBeNull()
-  })
-  it('sessão válida não consulta o PIN de novo dentro de 10 s e consulta depois disso', async () => {
-    let clock = 1_000_000
-    app = createApp(store, SECRET, { now: () => clock })
-    const t = await tokenFor('reception')
-    const spy = vi.spyOn(store, 'getPin')
-    for (let i = 0; i < 3; i++) await call('GET', '/api/events/current', t)
-    expect(spy).toHaveBeenCalledTimes(1)
-    clock += 11_000
-    await call('GET', '/api/events/current', t)
-    expect(spy).toHaveBeenCalledTimes(2)
-  })
   it('GET /api/list sem eventId devolve o evento aberto e seus grupos numa chamada só', async () => {
     const eid = await openEvent()
     const a = await tokenFor('reception')

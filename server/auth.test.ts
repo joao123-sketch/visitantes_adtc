@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { hashPin, signToken, verifyToken } from './auth'
+import { signToken, verifyToken } from './auth'
 
 const payload = { role: 'reception' as const, deviceId: 'dev-1', name: 'Carlos' }
 
@@ -23,13 +23,5 @@ describe('token', () => {
   it('token expirado vira null', async () => {
     const t = await signToken(payload, 'segredo', -10)
     expect(await verifyToken(t, 'segredo')).toBeNull()
-  })
-})
-
-describe('hashPin', () => {
-  it('é determinístico e depende do PIN e do sal', async () => {
-    expect(await hashPin('123456', 's')).toBe(await hashPin('123456', 's'))
-    expect(await hashPin('123456', 's')).not.toBe(await hashPin('654321', 's'))
-    expect(await hashPin('123456', 's')).not.toBe(await hashPin('123456', 't'))
   })
 })
