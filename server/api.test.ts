@@ -7,10 +7,10 @@ const SECRET = 'segredo-de-teste'
 let store: Store
 let app: ReturnType<typeof createApp>
 
-function login(role: string, deviceId = 'dev-A', name = 'Carlos') {
+function login(role: string, deviceId = 'dev-A', extra: Record<string, unknown> = {}) {
   return app.request('/api/login', {
     method: 'POST',
-    body: JSON.stringify({ role, deviceId, name }),
+    body: JSON.stringify({ role, deviceId, name: 'Carlos', password: role === 'admin' ? '1111' : '', ...extra }),
     headers: { 'content-type': 'application/json' },
   })
 }
@@ -29,13 +29,32 @@ function call(method: string, path: string, token?: string, body?: unknown) {
 beforeEach(async () => {
   store = memoryStore()
   app = createApp(store, SECRET)
+  await store.addReceptionist('Carlos', 'carlos')
 })
 
 describe('login', () => {
-  it('escolher o acesso devolve token e papel, sem código', async () => {
+  it('recepção: nome cadastrado entra; sem senha definida não pede senha', async () => {
     const r = await login('reception')
     expect(r.status).toBe(200)
     expect(await r.json()).toMatchObject({ role: 'reception' })
+  })
+  it('recepção: nome fora da lista é recusado e acento/caixa não importam', async () => {
+    await store.addReceptionist('José', 'jose')
+    expect((await login('reception', 'dev-A', { name: 'Maria' })).status).toBe(400)
+    expect((await login('reception', 'dev-A', { name: 'JOSE' })).status).toBe(200)
+  })
+  it('recepção sem nenhum recepcionista cadastrado não entra', async () => {
+    store = memoryStore()
+    app = createApp(store, SECRET)
+    const r = await login('reception')
+    expect(r.status).toBe(400)
+    expect(await r.json()).toEqual({ error: 'Nenhum recepcionista cadastrado. Fale com o administrador.' })
+  })
+  it('administrador entra com a senha padrão 1111 e não com outra', async () => {
+    expect((await login('admin')).status).toBe(200)
+    const wrong = await login('admin', 'dev-A', { password: '2222' })
+    expect(wrong.status).toBe(401)
+    expect(await wrong.json()).toEqual({ error: 'Senha incorreta' })
   })
   it('acesso inexistente devolve 400', async () => {
     const r = await login('dono')
@@ -45,6 +64,68 @@ describe('login', () => {
   it('rota protegida sem token ou com token inválido devolve 401', async () => {
     expect((await call('GET', '/api/events/current')).status).toBe(401)
     expect((await call('GET', '/api/events/current', 'lixo')).status).toBe(401)
+  })
+  it('opções da entrada: recepcionistas e quem pede senha', async () => {
+    const r = (await (await call('GET', '/api/login/options')).json()) as { receptionists: { name: string }[]; needsPassword: Record<string, boolean> }
+    expect(r.receptionists.map((x) => x.name)).toEqual(['Carlos'])
+    expect(r.needsPassword).toEqual({ admin: true, reception: false, presenter: false })
+  })
+})
+
+describe('senhas e recepcionistas', () => {
+  const put = (t: string, role: string, password: string) => call('PUT', `/api/passwords/${role}`, t, { password })
+  it('só o administrador troca senhas; senha precisa de 4 a 8 números', async () => {
+    const adm = await tokenFor('admin')
+    expect((await put(await tokenFor('reception'), 'reception', '5555')).status).toBe(403)
+    expect((await put(adm, 'reception', '123')).status).toBe(400)
+    expect((await put(adm, 'reception', 'abcd')).status).toBe(400)
+    expect((await put(adm, 'reception', '5555')).status).toBe(200)
+  })
+  it('depois de definida, a recepção passa a pedir a senha nova', async () => {
+    const adm = await tokenFor('admin')
+    await put(adm, 'reception', '5555')
+    expect((await login('reception')).status).toBe(401)
+    expect((await login('reception', 'dev-A', { password: '5555' })).status).toBe(200)
+    const o = (await (await call('GET', '/api/login/options')).json()) as { needsPassword: { reception: boolean } }
+    expect(o.needsPassword.reception).toBe(true)
+  })
+  it('trocar a senha derruba as sessões antigas daquele acesso, mas o administrador continua logado', async () => {
+    let clock = 1_000_000
+    app = createApp(store, SECRET, { now: () => clock })
+    const adm = await tokenFor('admin')
+    const rec = await tokenFor('reception')
+    expect((await call('GET', '/api/events/current', rec)).status).toBe(200)
+    await put(adm, 'reception', '5555')
+    clock += 11_000
+    expect((await call('GET', '/api/events/current', rec)).status).toBe(401)
+    const r = (await (await put(adm, 'admin', '9999')).json()) as { token?: string }
+    clock += 11_000
+    expect((await call('GET', '/api/events/current', adm)).status).toBe(401) // token antigo
+    expect((await call('GET', '/api/events/current', r.token)).status).toBe(200) // token novo
+    expect((await login('admin')).status).toBe(401) // 1111 já não vale
+    expect((await login('admin', 'dev-A', { password: '9999' })).status).toBe(200)
+  })
+  it('status das senhas, sem mostrar nenhuma', async () => {
+    const adm = await tokenFor('admin')
+    expect(await (await call('GET', '/api/access', adm)).json()).toEqual({ admin: 'default', reception: 'none', presenter: 'none' })
+    await put(adm, 'presenter', '4444')
+    expect(await (await call('GET', '/api/access', adm)).json()).toEqual({ admin: 'default', reception: 'none', presenter: 'custom' })
+  })
+  it('administrador cadastra, lista e apaga recepcionistas; repetido (acento/caixa) devolve 409', async () => {
+    const adm = await tokenFor('admin')
+    expect((await call('POST', '/api/receptionists', adm, { name: 'Ana Júlia' })).status).toBe(200)
+    expect((await call('POST', '/api/receptionists', adm, { name: 'ana julia' })).status).toBe(409)
+    expect((await call('POST', '/api/receptionists', adm, { name: '  ' })).status).toBe(400)
+    const list = (await (await call('GET', '/api/receptionists', adm)).json()) as { receptionists: { id: string; name: string }[] }
+    expect(list.receptionists.map((r) => r.name)).toEqual(['Ana Júlia', 'Carlos'])
+    await call('DELETE', `/api/receptionists/${list.receptionists[0].id}`, adm)
+    expect(((await (await call('GET', '/api/receptionists', adm)).json()) as { receptionists: unknown[] }).receptionists).toHaveLength(1)
+    expect((await call('GET', '/api/receptionists', await tokenFor('reception'))).status).toBe(403)
+  })
+  it('"lembrar" só muda a validade do token (não quebra a sessão)', async () => {
+    const r = await login('reception', 'dev-A', { remember: true })
+    const { token } = (await r.json()) as { token: string }
+    expect((await call('GET', '/api/events/current', token)).status).toBe(200)
   })
 })
 

@@ -23,12 +23,21 @@ export type PersonRow = {
 }
 export type NewPerson = Omit<PersonRow, 'id' | 'created_at' | 'presented'>
 
+export type ReceptionistRow = { id: string; name: string; name_key: string }
+
 export class OpenEventExists extends Error {}
 
 /** Já existe um grupo com o mesmo (evento, clientId): outro envio igual chegou antes. */
 export class UniqueViolation extends Error {}
 
 export interface Store {
+  getPin(role: string): Promise<{ pin_hash: string; salt: string } | null>
+  setPin(role: string, pin_hash: string, salt: string): Promise<void>
+  /** Recepcionistas cadastrados, em ordem alfabética. */
+  listReceptionists(): Promise<ReceptionistRow[]>
+  /** Devolve null se já existir um com o mesmo nome (sem diferenciar acento e caixa). */
+  addReceptionist(name: string, name_key: string): Promise<ReceptionistRow | null>
+  deleteReceptionist(id: string): Promise<void>
   getOpenEvent(): Promise<EventRow | null>
   getEvent(id: string): Promise<EventRow | null>
   /** Eventos mais recentes primeiro (até 20). */

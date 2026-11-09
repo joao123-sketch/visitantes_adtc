@@ -8,27 +8,37 @@ export class ApiError extends Error {
 
 export type Role = 'admin' | 'reception' | 'presenter'
 
+/** Com "lembrar de mim" a sessão fica no aparelho (localStorage); sem ele, só até fechar o app (sessionStorage). */
 export const session = {
   get token() {
-    return localStorage.getItem('token')
+    return sessionStorage.getItem('token') ?? localStorage.getItem('token')
   },
   get role() {
-    return localStorage.getItem('role') as Role | null
+    return (sessionStorage.getItem('role') ?? localStorage.getItem('role')) as Role | null
   },
   get name() {
     return localStorage.getItem('name') ?? ''
   },
-  set(token: string, role: Role) {
-    localStorage.setItem('token', token)
-    localStorage.setItem('role', role)
+  set(token: string, role: Role, remember = true) {
+    this.clear()
+    const store = remember ? localStorage : sessionStorage
+    store.setItem('token', token)
+    store.setItem('role', role)
+  },
+  /** Troca só o token (por exemplo, depois de o administrador mudar a própria senha), no mesmo lugar onde a sessão estava. */
+  replaceToken(token: string) {
+    const store = sessionStorage.getItem('token') !== null ? sessionStorage : localStorage
+    store.setItem('token', token)
   },
   setName(name: string) {
     localStorage.setItem('name', name)
   },
   /** Sai da sessão, mantendo a fila de pendentes guardada no celular. */
   clear() {
-    localStorage.removeItem('token')
-    localStorage.removeItem('role')
+    for (const store of [sessionStorage, localStorage]) {
+      store.removeItem('token')
+      store.removeItem('role')
+    }
   },
 }
 

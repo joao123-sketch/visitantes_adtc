@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'reception' | 'presenter'
-export type TokenPayload = { role: Role; deviceId: string; name?: string }
+export type TokenPayload = { role: Role; deviceId: string; name?: string; ph?: string }
 type Signed = TokenPayload & { exp: number }
 
 const enc = new TextEncoder()
@@ -18,6 +18,11 @@ const fromB64url = (s: string) => {
 
 async function hmacKey(secret: string) {
   return crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
+}
+
+export async function hashPin(pin: string, salt: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(`${salt}:${pin}`))
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 export async function signToken(payload: TokenPayload, secret: string, ttlSeconds = 86400): Promise<string> {

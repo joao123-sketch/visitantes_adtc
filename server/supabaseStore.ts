@@ -6,6 +6,7 @@ import {
   type GroupRow,
   type NewPerson,
   type PersonRow,
+  type ReceptionistRow,
   type Store,
 } from './store'
 
@@ -36,6 +37,24 @@ export function supabaseStore(url: string, serviceKey: string, client?: Supabase
   const db = client ?? createClient(url, serviceKey, { auth: { persistSession: false } })
 
   return {
+    async getPin(role) {
+      return must(await db.from('access_pins').select('pin_hash, salt').eq('role', role).maybeSingle())
+    },
+    async setPin(role, pin_hash, salt) {
+      must(await db.from('access_pins').upsert({ role, pin_hash, salt }))
+    },
+    async listReceptionists() {
+      return must(await db.from('receptionists').select('id, name, name_key').order('name')) as ReceptionistRow[]
+    },
+    async addReceptionist(name, name_key) {
+      const rows = must(
+        await db.from('receptionists').upsert({ name, name_key }, { onConflict: 'name_key', ignoreDuplicates: true }).select('id, name, name_key'),
+      ) as ReceptionistRow[]
+      return rows[0] ?? null
+    },
+    async deleteReceptionist(id) {
+      must(await db.from('receptionists').delete().eq('id', id))
+    },
     async getOpenEvent() {
       return must(await db.from('events').select('*').eq('status', 'open').maybeSingle()) as EventRow | null
     },

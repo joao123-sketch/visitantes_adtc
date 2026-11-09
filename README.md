@@ -33,7 +33,9 @@ A configuração do Worker está em `wrangler.jsonc`; só as rotas `/api/*` pass
 
 ## Acesso
 
-Não há código: a tela de entrada tem três caixas (Administrador, Recepção, Apresentação). A tabela `access_pins` do Supabase não é mais usada e pode ser apagada.
+A entrada tem três caixas: Administrador, Recepção e Apresentação. O Administrador entra com a senha padrão `1111` e, na aba Recepcionistas, cadastra os nomes de quem trabalha na recepção e troca as senhas dos três acessos (4 a 8 números). Recepção e Apresentação entram sem senha até o Administrador definir uma. Quem entra na Recepção escolhe o próprio nome na lista. "Lembrar de mim" mantém a sessão por 30 dias no aparelho; sem ele, a sessão dura até fechar o app (no máximo 12 horas).
+
+Antes de publicar esta versão, rode no SQL Editor do Supabase o arquivo `supabase/migrations/0002_receptionists.sql` (cria a tabela de recepcionistas e apaga as senhas antigas).
 
 ## Instalar no celular
 

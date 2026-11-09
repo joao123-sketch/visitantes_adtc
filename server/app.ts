@@ -1,10 +1,19 @@
 import { Hono } from 'hono'
 import type { Context, Next } from 'hono'
-import { signToken, verifyToken, type Role, type TokenPayload } from './auth'
+import { hashPin, signToken, verifyToken, type Role, type TokenPayload } from './auth'
 import { normalizeKey } from './normalize'
 import { OpenEventExists, UniqueViolation, type PersonRow, type Store } from './store'
 
 const ROLES: Role[] = ['admin', 'reception', 'presenter']
+
+/** Senha do Administrador até ele trocar. Recepção e Apresentação entram sem senha até o Administrador definir uma. */
+const DEFAULT_ADMIN_PASSWORD = '1111'
+const SESSION_SHORT = 12 * 3600 // sem "lembrar": 12 horas
+const SESSION_LONG = 30 * 86400 // com "lembrar": 30 dias
+/** A senha de cada acesso é conferida de novo a cada poucos segundos; trocar a senha derruba as sessões antigas. */
+const PH_CACHE_MS = 10_000
+export type PhCache = Map<Role, { ph: string; at: number }>
+export type AppOptions = { now?: () => number; phCache?: PhCache }
 
 type Env = { Variables: { user: TokenPayload } }
 
@@ -25,8 +34,10 @@ function mergeObservation(current: string | null, extra: string | null | undefin
   return current.toLowerCase().includes(add.toLowerCase()) ? current : `${current} · ${add}`
 }
 
-export function createApp(store: Store, secret: string) {
+export function createApp(store: Store, secret: string, opts: AppOptions = {}) {
   const app = new Hono<Env>()
+  const now = opts.now ?? Date.now
+  const phCache: PhCache = opts.phCache ?? new Map()
 
   // Falhas internas viram JSON genérico; o motivo real vai só para o log do servidor.
   app.onError((err, c) => {
@@ -34,11 +45,26 @@ export function createApp(store: Store, secret: string) {
     return c.json({ error: 'Erro no servidor' }, 500)
   })
 
+  type PinRow = { pin_hash: string; salt: string } | null
+  const phOf = (row: PinRow) => (row ? row.pin_hash.slice(0, 16) : 'padrao')
+  const needsPassword = (role: Role, row: PinRow) => role === 'admin' || row !== null
+  const passwordOk = async (role: Role, row: PinRow, password: string) =>
+    row ? (await hashPin(password, row.salt)) === row.pin_hash : role === 'admin' ? password === DEFAULT_ADMIN_PASSWORD : true
+
+  const currentPh = async (role: Role): Promise<string> => {
+    const hit = phCache.get(role)
+    if (hit && now() - hit.at < PH_CACHE_MS) return hit.ph
+    const ph = phOf(await store.getPin(role))
+    phCache.set(role, { ph, at: now() })
+    return ph
+  }
+
   const auth = async (c: Context<Env>, next: Next) => {
     const header = c.req.header('authorization') ?? ''
     const token = header.startsWith('Bearer ') ? header.slice(7) : ''
     const user = token ? await verifyToken(token, secret) : null
     if (!user) return c.json({ error: 'Sessão inválida' }, 401)
+    if (user.ph !== (await currentPh(user.role))) return c.json({ error: 'Sessão inválida' }, 401)
     c.set('user', user)
     await next()
   }
@@ -49,18 +75,37 @@ export function createApp(store: Store, secret: string) {
       await next()
     }
 
-  // Sem código de acesso: a pessoa escolhe Administrador, Recepção ou Apresentação na tela de entrada.
+  // Tela de entrada: quem pode escolher o nome (recepcionistas) e quais acessos pedem senha.
+  app.get('/api/login/options', async (c) => {
+    const [reception, presenter, receptionists] = await Promise.all([store.getPin('reception'), store.getPin('presenter'), store.listReceptionists()])
+    return c.json({
+      receptionists: receptionists.map((r) => ({ id: r.id, name: r.name })),
+      needsPassword: { admin: true, reception: needsPassword('reception', reception), presenter: needsPassword('presenter', presenter) },
+    })
+  })
+
   app.post('/api/login', async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const role = body.role as Role
     const deviceId = String(body.deviceId ?? '')
     if (!deviceId) return c.json({ error: 'Aparelho não identificado' }, 400)
     if (!ROLES.includes(role)) return c.json({ error: 'Acesso inválido' }, 400)
-    const name = body.name ? text(body.name) : undefined
-    return c.json({ token: await signToken({ role, deviceId, name }, secret), role })
+
+    let name: string | undefined
+    if (role === 'reception') {
+      const list = await store.listReceptionists()
+      if (list.length === 0) return c.json({ error: 'Nenhum recepcionista cadastrado. Fale com o administrador.' }, 400)
+      const found = list.find((r) => r.name_key === normalizeKey(text(body.name)))
+      if (!found) return c.json({ error: 'Escolha o seu nome na lista' }, 400)
+      name = found.name
+    }
+    const row = await store.getPin(role)
+    if (!(await passwordOk(role, row, String(body.password ?? '')))) return c.json({ error: 'Senha incorreta' }, 401)
+    const ttl = body.remember ? SESSION_LONG : SESSION_SHORT
+    return c.json({ token: await signToken({ role, deviceId, name, ph: phOf(row) }, secret, ttl), role })
   })
 
-  app.use('/api/*', async (c, next) => (c.req.path === '/api/login' ? next() : auth(c, next)))
+  app.use('/api/*', async (c, next) => (c.req.path === '/api/login' || c.req.path === '/api/login/options' ? next() : auth(c, next)))
 
   // ---------- eventos ----------
   app.get('/api/events/current', async (c) => c.json({ event: await store.getOpenEvent() }))
@@ -100,6 +145,46 @@ export function createApp(store: Store, secret: string) {
       if (e instanceof OpenEventExists) return c.json({ error: 'Já existe um evento aberto' }, 409)
       throw e
     }
+  })
+
+  // ---------- recepcionistas e senhas (administrador) ----------
+  app.get('/api/receptionists', only('admin'), async (c) => c.json({ receptionists: await store.listReceptionists() }))
+
+  app.post('/api/receptionists', only('admin'), async (c) => {
+    const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
+    const name = text(body.name)
+    if (!name) return c.json({ error: 'Informe o nome' }, 400)
+    if (name.length > 60) return c.json({ error: 'Nome muito longo' }, 400)
+    const row = await store.addReceptionist(name, normalizeKey(name))
+    if (!row) return c.json({ error: 'Esse nome já está cadastrado' }, 409)
+    return c.json(row)
+  })
+
+  app.delete('/api/receptionists/:id', only('admin'), async (c) => {
+    await store.deleteReceptionist(c.req.param('id') ?? '')
+    return c.json({ ok: true })
+  })
+
+  /** Quais acessos já têm senha própria (sem mostrar nenhuma senha). */
+  app.get('/api/access', only('admin'), async (c) => {
+    const [a, r, p] = await Promise.all([store.getPin('admin'), store.getPin('reception'), store.getPin('presenter')])
+    return c.json({ admin: a ? 'custom' : 'default', reception: r ? 'custom' : 'none', presenter: p ? 'custom' : 'none' })
+  })
+
+  app.put('/api/passwords/:role', only('admin'), async (c) => {
+    const role = c.req.param('role') as Role
+    const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
+    const password = String(body.password ?? '')
+    if (!ROLES.includes(role)) return c.json({ error: 'Acesso inválido' }, 400)
+    if (!/^\d{4,8}$/.test(password)) return c.json({ error: 'A senha precisa ter de 4 a 8 números' }, 400)
+    const salt = crypto.randomUUID()
+    const pin_hash = await hashPin(password, salt)
+    await store.setPin(role, pin_hash, salt)
+    phCache.delete(role) // as sessões antigas deste acesso deixam de valer
+    const user = c.get('user')
+    // Quem trocou a própria senha continua logado: recebe um token novo.
+    if (role !== user.role) return c.json({ ok: true })
+    return c.json({ ok: true, token: await signToken({ role, deviceId: user.deviceId, name: user.name, ph: pin_hash.slice(0, 16) }, secret, SESSION_LONG) })
   })
 
   // ---------- listagens (recepção e apresentador) ----------

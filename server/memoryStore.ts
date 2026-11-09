@@ -5,11 +5,14 @@ import {
   type GroupRow,
   type NewPerson,
   type PersonRow,
+  type ReceptionistRow,
   type Store,
 } from './store'
 
 /** Store em memória, usado nos testes. Imita as restrições únicas do banco. */
 export function memoryStore(): Store {
+  const pins = new Map<string, { pin_hash: string; salt: string }>()
+  const receptionists: ReceptionistRow[] = []
   const events: EventRow[] = []
   const groups: GroupRow[] = []
   const people: PersonRow[] = []
@@ -28,6 +31,25 @@ export function memoryStore(): Store {
   }
 
   return {
+    async getPin(role) {
+      return pins.get(role) ?? null
+    },
+    async setPin(role, pin_hash, salt) {
+      pins.set(role, { pin_hash, salt })
+    },
+    async listReceptionists() {
+      return [...receptionists].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+    },
+    async addReceptionist(name, name_key) {
+      if (receptionists.some((r) => r.name_key === name_key)) return null
+      const row: ReceptionistRow = { id: id(), name, name_key }
+      receptionists.push(row)
+      return row
+    },
+    async deleteReceptionist(rid) {
+      const i = receptionists.findIndex((r) => r.id === rid)
+      if (i >= 0) receptionists.splice(i, 1)
+    },
     async getOpenEvent() {
       return events.find((e) => e.status === 'open') ?? null
     },

@@ -5,8 +5,9 @@ import { DEPARTMENTS, deptKey, eventName } from '../presets'
 import { useDept } from '../useDept'
 import { isoDate, nextOccurrence, WEEKLY_SERVICES } from '../schedule'
 import { Skeleton, useToast } from '../ui'
+import { Receptionists } from './Receptionists'
 
-export function Admin() {
+function EventsTab() {
   const [events, setEvents] = useState<EventInfo[]>([])
   const [name, setName] = useState('')
   const [dept, setDept] = useState('')
@@ -64,16 +65,11 @@ export function Admin() {
   // Até a primeira resposta, esqueleto no lugar do formulário (senão aparecia "Abrir evento" e logo trocava).
   if (!loaded)
     return (
-      <>
-        <h1>Administração</h1>
-        <Skeleton rows={2} header={false} />
-      </>
+      <Skeleton rows={2} header={false} />
     )
 
   return (
     <>
-      <h1>Administração</h1>
-
       <div className="card">
         <div className="card-title">Evento aberto</div>
         {open ? (
@@ -201,6 +197,28 @@ export function Admin() {
       </div>
 
       {toast}
+    </>
+  )
+}
+
+const TABS = [
+  { id: 'events', label: 'Eventos' },
+  { id: 'receptionists', label: 'Recepcionistas' },
+] as const
+
+export function Admin() {
+  const [tab, setTab] = useState<(typeof TABS)[number]['id']>('events')
+  return (
+    <>
+      <h1>Administração</h1>
+      <div className="tabs" role="tablist" aria-label="Seções da administração">
+        {TABS.map((t) => (
+          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={`tab${tab === t.id ? ' on' : ''}`} onClick={() => setTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === 'events' ? <EventsTab /> : <Receptionists />}
     </>
   )
 }
