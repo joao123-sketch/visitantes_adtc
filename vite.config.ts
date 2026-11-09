@@ -24,7 +24,7 @@ export default defineConfig({
           { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: { navigateFallbackDenylist: [/^\/api\//] },
+      workbox: { navigateFallbackDenylist: [/^\/api\//], skipWaiting: true, clientsClaim: true, cleanupOutdatedCaches: true },
     }),
   ],
   server: { proxy: { '/api': 'http://localhost:8788' } },
